@@ -410,108 +410,109 @@ class Graph(object):
                 Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
                 Bps[Bps==0]=1
                             
-                try:
-                    for idc, c in enumerate(CO):
-                        
-                        #construct system of equations
-                        anc = self.ancestry()
-                        Ps = np.arange(self.N)[anc[:,c].any(axis=Graph.AXIS_LABELS['sink'])]
-                        def make_sigma_expression(t,j,i):
-                            return (-RHOs[t,j,i] 
-                                    + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
-                                                                   for k in self.variables] 
-                                                                  for v in self.lags])))
-                        last = np.max(np.array([self.order(i) for i in list(c)]))
-                        so_far = CO[:idc] #+1
-                        if len(so_far)>0:
-                            so_far = np.concatenate(so_far) #+1
-                            now_look =np.concatenate([so_far,c])
-                        else:
-                            now_look = c
-                        def to_include(j,i,t):
-                            if t==0 and self.order(i)<=self.order(j):
-                                return False
-                            if t==self.tau_max and self.order(i)>=last:
-                                return False
-                            if j in c:
-                                return i in Ps
-                            elif i in c:
-                                return j in Ps
+                #try:
+                for idc, c in enumerate(CO):
+                    
+                    #construct system of equations
+                    anc = self.ancestry()
+                    Ps = np.arange(self.N)[anc[:,c].any(axis=Graph.AXIS_LABELS['sink'])]
+                    def make_sigma_expression(t,j,i):
+                        return (-RHOs[t,j,i] 
+                                + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
+                                                               for k in self.variables] 
+                                                              for v in self.lags])))
+                    last = np.max(np.array([self.order(i) for i in list(c)]))
+                    so_far = CO[:idc] #+1
+                    if len(so_far)>0:
+                        so_far = np.concatenate(so_far) #+1
+                        now_look =np.concatenate([so_far,c])
+                    else:
+                        now_look = c
+                    def to_include(j,i,t):
+                        if t==0 and self.order(i)<=self.order(j):
                             return False
-                        def to_calc(j,i,t):
-                            if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
-                                return True
-                            if j in c:
-                                return i not in Ps
-                            elif i in c:
-                                return j not in Ps
+                        if t==self.tau_max and self.order(i)>=last:
                             return False
-                        s_exp = [(-Cs[i]**2 
-                                  + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
-                                                                         for j in self.variables] 
-                                                                        for k in self.variables] 
-                                                                       for t in self.lags] 
-                                                                      for v in self.lags])) 
-                                  + (1-r[i]**2)*Bps[i] for i in c)]
-                        s_exp += [make_sigma_expression(0,j,i) 
-                                  for i in now_look
-                                  for j in now_look
-                                  if to_include(j,i,0)]
-                        s_exp += [make_sigma_expression(self.tau_max, j, i) 
-                                  for i in now_look 
-                                  for j in now_look
-                                  if to_include(j,i,self.tau_max)]
-                        s_exp += [make_sigma_expression(t,j,i) 
-                                  for i in now_look
-                                  for j in now_look
-                                  for t in self.lags[1:]
-                                  if to_include(j,i,t)]
-                        cxs = np.array([n in now_look for n in self.variables])
-                        rho_loc = list(set(RHOs[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
-                        cxs_small = np.array([n in now_look if self.order(n)<last else False 
-                                              for n in self.variables])
-                        rho_loc += list(set(RHOs[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
-                        rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                                and Matrix(s_exp).has(rho))]
-                        rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                                and not Matrix(s_exp).has(rho))]
-                        now_vars = [Cs[cx] for cx in c] + rho_loc_1
-                        
-                        #solve
-                        check_vars(now_vars, s_exp)
-                        SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
-                        S_dict_local = {now_vars[i]: SSSS[i] for i in range(len(now_vars))}
-    
-                        #second update
+                        if j in c:
+                            return i in Ps
+                        elif i in c:
+                            return j in Ps
+                        return False
+                    def to_calc(j,i,t):
+                        if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
+                            return True
+                        if j in c:
+                            return i not in Ps
+                        elif i in c:
+                            return j not in Ps
+                        return False
+                    s_exp = [-Cs[i]**2 
+                              + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
+                                                                     for j in self.variables] 
+                                                                    for k in self.variables] 
+                                                                   for t in self.lags] 
+                                                                  for v in self.lags])) 
+                              + (1-r[i]**2)*Bps[i] for i in c]
+                    s_exp += [make_sigma_expression(0,j,i) 
+                              for i in now_look
+                              for j in now_look
+                              if to_include(j,i,0)]
+                    s_exp += [make_sigma_expression(self.tau_max, j, i) 
+                              for i in now_look 
+                              for j in now_look
+                              if to_include(j,i,self.tau_max)]
+                    s_exp += [make_sigma_expression(t,j,i) 
+                              for i in now_look
+                              for j in now_look
+                              for t in self.lags[1:]
+                              if to_include(j,i,t)]
+                    cxs = np.array([n in now_look for n in self.variables])
+                    rho_loc = list(set(RHOs[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
+                    cxs_small = np.array([n in now_look if self.order(n)<last else False 
+                                          for n in self.variables])
+                    rho_loc += list(set(RHOs[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
+                    rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                            and Matrix(s_exp).has(rho))]
+                    rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                            and not Matrix(s_exp).has(rho))]
+                    now_vars = [Cs[cx] for cx in c] + rho_loc_1
+                    
+                    #solve
+                    check_vars(now_vars, s_exp)
+                    SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
+                    S_dict_local = {now_vars[i]: SSSS[i] for i in range(len(now_vars))}
+
+                    #second update
+                    for i in c:
+                        Cs[i] = Cs[i].subs(S_dict_local)
+                        self[:,i,:]=self[:,i,:]*r[i]/Cs[i]
+                        RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
+                        RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
+                    
+                    #calculate some more!
+                    calc_dict = {}
+                    last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
+                    for j in now_look:
+                        for i in now_look:
+                            for t in self.lags:
+                                if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
+                                    calc_dict[RHOs[t,j,i]]=(r[i]/Cs[i]
+                                                            *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
+                                                                               for k in now_look] 
+                                                                              for v in self.lags])))
+                    exp_here = [-k + v for k, v in calc_dict.items()]
+                    ks = list(calc_dict.keys())
+                    if len(exp_here)>0:
+                        check_vars(ks, exp_here)
+                        SH = nsolve(exp_here, ks, [0 for i in ks])
+                        calc_dict = {k: SH[i] for i, k in enumerate(ks)}
                         for i in c:
-                            Cs[i] = Cs[i].subs(S_dict_local)
-                            self[:,i,:]=self[:,i,:]*r[i]/Cs[i]
-                            RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
-                            RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
-                        
-                        #calculate some more!
-                        calc_dict = {}
-                        last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
-                        for j in now_look:
-                            for i in now_look:
-                                for t in self.lags:
-                                    if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
-                                        calc_dict[RHOs[t,j,i]]=(r[i]/Cs[i]
-                                                                *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
-                                                                                   for k in now_look] 
-                                                                                  for v in self.lags])))
-                        exp_here = [-k + v for k, v in calc_dict.items()]
-                        ks = list(calc_dict.keys())
-                        if len(exp_here)>0:
-                            check_vars(ks, exp_here)
-                            SH = nsolve(exp_here, ks, [0 for i in ks])
-                            calc_dict = {k: SH[i] for i, k in enumerate(ks)}
                             RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(calc_dict))
                             RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(calc_dict))
     
-                except ValueError:
-                    discarded_c +=1
-                    continue
+                #except ValueError:
+                #    discarded_c +=1
+                #    continue
 
             else:
                 self.A*=np.random.uniform(low=.2, high=2, size=self.shape)
@@ -892,7 +893,7 @@ class TimeSeries(object):
         vo = np.argsort(v)
         vo = vo[::-1]
         plt.plot(self.data.T[:,vo])
-        plt.legend(list(np.array(G.labels)[vo]))
+        plt.legend(list(np.array(self.labels)[vo]))
         plt.xlim([0,self.T-1])
         plt.xlabel("Time")
         plt.ylabel("Standardized Value")
