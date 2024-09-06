@@ -356,10 +356,10 @@ class Graph(object):
         def R_symbol(i,j,l):
             return Symbol("R{}.{}({})".format(i,j,l))
         def check_vars(now_vars, s_exp):
-            missing_vars = [v for v in Matrix(s_exp).free_symbols 
-                            if not Matrix(now_vars).has(v)]
+            missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
             if len(missing_vars)>0:
                 print("MISSING VARIABLES! {}".format(missing_vars))
+            return len(missing_vars)==0
 
         A_init = (self.A != 0).astype(float)
         while not stable:
@@ -403,7 +403,7 @@ class Graph(object):
                 RHOs[1:(self.tau_max+1),:,:] = np.array([[[R_symbol(j,k,t) for k in self.variables] 
                                                           for j in self.variables] 
                                                          for t in self.lags[1:]])
-                RHOs[self.tau_max,:,self.topo_order[self.N-1]]=0
+                RHOs[self.tau_max,:,self.topo_order[-1]]=0
                 for t in range(-self.tau_max, 0):
                     RHOs[t,:,:] = RHOs[-t,:,:].T
     
@@ -412,7 +412,7 @@ class Graph(object):
                             
                 try:
                     for idc, c in enumerate(CO):
-                        
+                        calc_dicts = []
                         #construct system of equations
                         anc = self.ancestry()
                         Ps = np.arange(self.N)[anc[:,c].any(axis=Graph.AXIS_LABELS['sink'])]
@@ -447,11 +447,11 @@ class Graph(object):
                                 return j not in Ps
                             return False
                         s_exp = [-Cs[i]**2 
-                                  + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
-                                                                         for j in self.variables] 
-                                                                        for k in self.variables] 
-                                                                       for t in self.lags] 
-                                                                      for v in self.lags])) 
+                                 + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
+                                                               for j in self.variables] 
+                                                              for k in self.variables]
+                                                             for t in self.lags]
+                                                            for v in self.lags])) 
                                   + (1-r[i]**2)*Bps[i] for i in c]
                         s_exp += [make_sigma_expression(0,j,i) 
                                   for i in now_look
@@ -480,7 +480,7 @@ class Graph(object):
                         #solve
                         check_vars(now_vars, s_exp)
                         SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
-                        S_dict_local = {now_vars[i]: SSSS[i] for i in range(len(now_vars))}
+                        S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
     
                         #second update
                         for i in c:
@@ -496,19 +496,25 @@ class Graph(object):
                             for i in now_look:
                                 for t in self.lags:
                                     if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
-                                        calc_dict[RHOs[t,j,i]]=(r[i]/Cs[i]
-                                                                *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
-                                                                                   for k in now_look] 
-                                                                                  for v in self.lags])))
+                                        calc_dict[RHOs[t,j,i]]=r[i]/Cs[i] \
+                                                               *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k]
+                                                                                  for k in now_look]
+                                                                                 for v in self.lags]))
                         exp_here = [-k + v for k, v in calc_dict.items()]
                         ks = list(calc_dict.keys())
                         if len(exp_here)>0:
                             check_vars(ks, exp_here)
                             SH = nsolve(exp_here, ks, [0 for i in ks])
                             calc_dict = {k: SH[i] for i, k in enumerate(ks)}
+                            calc_dicts+=[calc_dict]
                             for i in c:
                                 RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(calc_dict))
                                 RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(calc_dict))
+
+                    if not check_vars([], Matrix(np.sum(RHOs, axis=2))):
+                        for cd in calc_dicts:
+                            for k, v in cd.items():
+                                print("{}: {}".format(k,v))
     
                 except ValueError:
                     discarded_c +=1
@@ -553,7 +559,7 @@ class Graph(object):
                 print("discarded {} solutions: {} unstable and {} that did not converge".format(
                     discarded_u+discarded_c, discarded_u, discarded_c))
         else:
-            print('                               ')
+            print('                             ')
 
         return self
         
@@ -902,17 +908,17 @@ class TimeSeries(object):
         return "TimeSeries {}".format(id(self))
 
 if __name__ == '__main__':
-    Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=100)
+    Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=10)
     print(text_trap.getvalue())
     axs = plt.subplots(2,2)
-    axs[0,0].hist(np.array([d.var() for d in Ds]).flatten())
-    axs[0,0].set_title("Variance")
-    axs[0,1].hist(np.array([d.sortability() for d in Gs]).flatten())
-    axs[0,1].xlim([0,1])
-    axs[0,1].set_title("Varsortability")
-    axs[1,0].hist(np.array([d.sortability('R2') for d in Gs]).flatten())
-    axs[1,0].xlim([0,1])
-    axs[1,0].set_title("R2-sortability")
-    axs[1,1].hist(np.array([d.sortability('R2_summary') for d in Gs]).flatten())
-    axs[1,1].xlim([0,1])
-    axs[1,1].set_title("R2'-sortability")
+    axs[0].hist(np.array([d.var() for d in Ds]).flatten())
+    axs[0].set_title("Variance")
+    axs[1].hist(np.array([d.sortability() for d in Gs]).flatten())
+    axs[1].xlim([0,1])
+    axs[1].set_title("Varsortability")
+    axs[2].hist(np.array([d.sortability('R2') for d in Gs]).flatten())
+    axs[2].xlim([0,1])
+    axs[2].set_title("R2-sortability")
+    axs[3].hist(np.array([d.sortability('R2_summary') for d in Gs]).flatten())
+    axs[3].xlim([0,1])
+    axs[3].set_title("R2'-sortability")
