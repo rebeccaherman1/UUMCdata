@@ -802,19 +802,26 @@ class Graph(object):
             DAG_width *= self.N/N_CUTOFF
         MAX_ROWS = int(np.floor(5*DAG_width))
         Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
-        num_tables = int(np.ceil(Table_height/DAG_width))
         Table_width = .75*len(self.lags)+.5
-
-        w_space_frac = .05
+        if summary_edges > 0:
+            num_tables = int(np.ceil(Table_height/DAG_width))
+            w_space_frac = .05
+            ROWS_PER_TABLE = int(np.ceil(summary_edges/num_tables))
+        else:
+            num_tables = 0
+            w_space_frac = 0
         fig_width = (DAG_width+(Table_width)*num_tables)/(1-w_space_frac)
         
         ax = plt.figure(figsize=(fig_width,DAG_width*(1-w_space_frac)), 
                         layout="constrained").subplots(1,num_tables+1,
                                                        width_ratios=[DAG_width]+[Table_width]*num_tables,
                                                        gridspec_kw = {'wspace':w_space_frac})
-        ax[0].set_axis_off()
+        if num_tables==0:
+            first_ax = ax
+        else:
+            first_ax = ax[0]
         artists = []
-        ROWS_PER_TABLE = int(np.ceil(summary_edges/num_tables))
+        first_ax.axis("off")
         def label_len(label):
             digits_ = 0
             valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
@@ -841,8 +848,8 @@ class Graph(object):
             artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.525),
                                       .025*label_len(label)+.05, .1, ec="none")
             artist.set(color="black")
-            ax[0].add_artist(artist)
-            ax[0].annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
+            first_ax.add_artist(artist)
+            first_ax.annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
             artists +=[artist]
         if summary_edges > 0: #necessary because of weirdness in matplotlib.table -- can't make an empty table
             h = np.array(["Lag {}".format(i) for i in self.lags])
