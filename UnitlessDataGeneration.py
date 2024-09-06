@@ -14,6 +14,7 @@ import warnings
 
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
+import re
 
 class UnstableError(Exception): pass
 class ConvergenceError(Exception): pass
@@ -796,10 +797,16 @@ class Graph(object):
         ax = plt.figure(figsize=(7,3), layout="constrained").subplots(1,2)
         ax[0].set_axis_off()
         artists = []
+        def label_len(label):
+            digits_ = 0
+            valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
+            for digit_type in valid_digits:
+                digits_ += len(re.findall(digit_type,label))
+            return digits_
         for i, label in enumerate(self.labels):
             angle = 2*np.pi/self.N*i
             radius = .25
-            artist = mpatches.Circle((np.cos(angle)*radius+.5,np.sin(angle)*radius+.5), .05, ec="none")
+            artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.5), .025*label_len(label)+.05, .1, ec="none")
             artist.set(color="black")
             ax[0].add_artist(artist)
             ax[0].annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
