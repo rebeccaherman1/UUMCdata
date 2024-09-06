@@ -187,7 +187,7 @@ class Graph(object):
     @classmethod
     def specified(cls, init, topo_order, noise=None, labels=None):
         '''Helper function for initializing a graph from a specified adjacency matrix'''
-        return cls(init.shape[0], init.shape[-1], 
+        return cls(init.shape[Graph.AXIS_LABELS['source']], init.shape[Graph.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, topo_order=topo_order,
                    labels=labels,noise=noise)
     @classmethod
