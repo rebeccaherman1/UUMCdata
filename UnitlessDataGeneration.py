@@ -541,7 +541,7 @@ class Graph(object):
             s2 = np.array([1 for i in self.variables])
         self.s2 = s2
 
-        print('')
+        sys.stdout.write('\r')
         if discarded_u + discarded_c > 0:
             if discarded_u == 0:
                 print("discarded {} solution{} that did not converge".format(
@@ -552,6 +552,8 @@ class Graph(object):
             else:
                 print("discarded {} solutions: {} unstable and {} that did not converge".format(
                     discarded_u+discarded_c, discarded_u, discarded_c))
+        else:
+            print('                               ')
 
         return self
         
