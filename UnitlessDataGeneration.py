@@ -227,6 +227,9 @@ class Graph(object):
 
         text_trap = io.StringIO()
         while len(Gs)<B:
+            all_errors = no_converge+unstable+diverge+TO
+            Graph._progress_message("{:.0%} completed ({} discarded)".format(
+                                    len(Ds)/B, all_errors))
             try:
                 with time_lim(time_limit):
                     with redirect_stdout(text_trap):
@@ -247,9 +250,6 @@ class Graph(object):
                 continue
             Gs+=[G]
             Ds+=[D]
-            all_errors = no_converge+unstable+diverge+TO
-            Graph._progress_message("{:.0%} completed ({} discarded)".format(
-                                    len(Ds)/B, all_errors))
     
         sys.stdout.write('\r')
         if all_errors>0:
@@ -910,7 +910,7 @@ class TimeSeries(object):
 if __name__ == '__main__':
     Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=10)
     print(text_trap.getvalue())
-    axs = plt.subplots(2,2)
+    axs = plt.figure(figsize=(7,3), layout="constrained").subplots(2,2)
     axs[0].hist(np.array([d.var() for d in Ds]).flatten())
     axs[0].set_title("Variance")
     axs[1].hist(np.array([d.sortability() for d in Gs]).flatten())
