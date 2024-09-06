@@ -794,30 +794,57 @@ class Graph(object):
 
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
-        ax = plt.figure(figsize=(7,3), layout="constrained").subplots(1,2)
+        MAX_ROWS = 15
+        S = self.summary()
+        summary_edges = np.sum(S)
+        DAG_width = 3
+        Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
+        num_tables = int(np.ceil(Table_height/DAG_width))
+        Table_width = .75*len(self.lags)+.5
+
+        w_space_frac = .05
+        fig_width = (DAG_width+(Table_width)*num_tables)/(1-w_space_frac)
+        
+        ax = plt.figure(figsize=(fig_width,DAG_width*(1-w_space_frac)), 
+                        layout="constrained").subplots(1,num_tables+1,
+                                                       width_ratios=[DAG_width]+[Table_width]*num_tables,
+                                                       gridspec_kw = {'wspace':w_space_frac})
         ax[0].set_axis_off()
         artists = []
+        ROWS_PER_TABLE = int(np.ceil(summary_edges/num_tables))
         def label_len(label):
             digits_ = 0
             valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
             for digit_type in valid_digits:
                 digits_ += len(re.findall(digit_type,label))
             return digits_
+        def plot_table(table_id, rep, ri, h):
+            cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
+            if rep.shape[0]%2==1:
+                cs+=[['0.8']*(rep.shape[1])]
+            subplot_ = table_id+1
+            ax[subplot_].table(cellText=rep, loc='center', rowLabels=ri, colLabels=h, cellLoc='center', cellColours=cs)
+            ax[subplot_].axis("off")
+        def make_table_contents(table_id, summary_edges):
+            remaining_edges = summary_edges - table_id*ROWS_PER_TABLE
+            num_rows = min([remaining_edges, ROWS_PER_TABLE])
+            rep = np.zeros((num_rows, len(self.lags))).astype(object)
+            ri = np.zeros((num_rows,)).astype(object)
+            r = 0
+            return rep, ri, r
         for i, label in enumerate(self.labels):
             angle = 2*np.pi/self.N*i
-            radius = .25
-            artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.5), .025*label_len(label)+.05, .1, ec="none")
+            radius = .35
+            artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.525),
+                                      .025*label_len(label)+.05, .1, ec="none")
             artist.set(color="black")
             ax[0].add_artist(artist)
             ax[0].annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
             artists +=[artist]
-        S = self.summary()
-        summary_edges = np.sum(S)
         if summary_edges > 0: #necessary because of weirdness in matplotlib.table -- can't make an empty table
-            rep = np.zeros((summary_edges, len(self.lags))).astype(object)
             h = np.array(["Lag {}".format(i) for i in self.lags])
-            ri = np.zeros((summary_edges,)).astype(object)
-            r=0
+            table_id = 0
+            rep, ri, r = make_table_contents(table_id, summary_edges)
             for i in self.variables:
                 for j in self.variables:
                     if S[i,j]!=0:
@@ -840,11 +867,12 @@ class Graph(object):
                         if self.order(j)<=self.order(i):
                             rep[r,0]=np.nan
                         r+=1
-            cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
-            if rep.shape[0]%2==1:
-                cs+=[['0.8']*(rep.shape[1])]
-            ax[1].table(cellText=rep, loc='center', rowLabels=ri, colLabels=h, cellLoc='center', cellColours=cs)
-        ax[1].axis("off")
+                        if r >= ROWS_PER_TABLE and table_id+1 < num_tables:
+                            plot_table(table_id, rep, ri, h)
+                            table_id+=1
+                            rep, ri, r = make_table_contents(table_id, summary_edges)
+            plot_table(table_id, rep, ri, h)
+                            
         return "Graph {}".format(id(self))
 
 class TimeSeries(object):
