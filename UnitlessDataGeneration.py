@@ -902,7 +902,7 @@ class TimeSeries(object):
         return "TimeSeries {}".format(id(self))
 
 if __name__ == '__main__':
-    Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=300)
+    Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=100)
     print(text_trap.getvalue())
     axs = plt.subplots(2,2)
     axs[0,0].hist(np.array([d.var() for d in Ds]).flatten())
