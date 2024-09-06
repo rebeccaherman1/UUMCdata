@@ -806,36 +806,37 @@ class Graph(object):
             artists +=[artist]
         S = self.summary()
         summary_edges = np.sum(S)
-        rep = np.zeros((summary_edges, len(self.lags))).astype(object)
-        h = np.array(["Lag {}".format(i) for i in self.lags])
-        ri = np.zeros((summary_edges,)).astype(object)
-        r=0
-        for i in self.variables:
-            for j in self.variables:
-                if S[i,j]!=0:
-                    posA=artists[i].center
-                    posB=artists[j].center
-                    if i<j:
-                        connectionstyle="arc3,rad=.5"
-                    elif i==j:
-                        connectionstyle="arc3,rad=2"
-                        posA = artists[i].get_corners()[0]
-                        posB = artists[i].get_corners()[1]
-                    else:
-                        connectionstyle="arc3"
-                    arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
-                                                     arrowstyle='->', mutation_scale=15, color='k', 
-                                                     connectionstyle=connectionstyle)
-                    ax[0].add_artist(arrow)
-                    ri[r] = "{}-->{}".format(i,j)
-                    rep[r,:]=np.array([str(round(a,3)) for a in self[i,j,:]])
-                    if self.order(j)<=self.order(i):
-                        rep[r,0]=np.nan
-                    r+=1
-        cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
-        if rep.shape[0]%2==1:
-            cs+=[['0.8']*(rep.shape[1])]
-        ax[1].table(cellText=rep, loc='center', rowLabels=ri, colLabels=h, cellLoc='center', cellColours=cs)
+        if summary_edges > 0: #necessary because of weirdness in matplotlib.table -- can't make an empty table
+            rep = np.zeros((summary_edges, len(self.lags))).astype(object)
+            h = np.array(["Lag {}".format(i) for i in self.lags])
+            ri = np.zeros((summary_edges,)).astype(object)
+            r=0
+            for i in self.variables:
+                for j in self.variables:
+                    if S[i,j]!=0:
+                        posA=artists[i].center
+                        posB=artists[j].center
+                        if i<j:
+                            connectionstyle="arc3,rad=.5"
+                        elif i==j:
+                            connectionstyle="arc3,rad=2"
+                            posA = artists[i].get_corners()[0]
+                            posB = artists[i].get_corners()[1]
+                        else:
+                            connectionstyle="arc3"
+                        arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
+                                                         arrowstyle='->', mutation_scale=15, color='k', 
+                                                         connectionstyle=connectionstyle)
+                        ax[0].add_artist(arrow)
+                        ri[r] = "{}-->{}".format(i,j)
+                        rep[r,:]=np.array([str(round(a,3)) for a in self[i,j,:]])
+                        if self.order(j)<=self.order(i):
+                            rep[r,0]=np.nan
+                        r+=1
+            cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
+            if rep.shape[0]%2==1:
+                cs+=[['0.8']*(rep.shape[1])]
+            ax[1].table(cellText=rep, loc='center', rowLabels=ri, colLabels=h, cellLoc='center', cellColours=cs)
         ax[1].axis("off")
         return "Graph {}".format(id(self))
 
