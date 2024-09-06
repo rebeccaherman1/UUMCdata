@@ -794,10 +794,13 @@ class Graph(object):
 
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
-        MAX_ROWS = 15
         S = self.summary()
         summary_edges = np.sum(S)
         DAG_width = 3
+        N_CUTOFF = 8
+        if self.N > N_CUTOFF:
+            DAG_width *= self.N/N_CUTOFF
+        MAX_ROWS = int(np.floor(5*DAG_width))
         Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
         num_tables = int(np.ceil(Table_height/DAG_width))
         Table_width = .75*len(self.lags)+.5
