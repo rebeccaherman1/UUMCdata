@@ -117,8 +117,8 @@ class Graph(object):
         #helper function definitions
         def adjust_p(p, tm):
             return 1 - (1-p)**(1/tm)
-        def rand_edge(p):
-            return np.random.choice([1,0], p=[p, 1-p])
+        def rand_edges(p, size=None):
+            return np.random.choice(a=[1,0], size=size, p=[p, 1-p])
 
         #user-specified initializations
         self.N = N
@@ -162,15 +162,12 @@ class Graph(object):
                     p_auto=p
                 p = adjust_p(p, self.tau_max+1)
                 p_auto = adjust_p(p_auto, self.tau_max)
-                #set contemporaneous adjacencies
-                for i in range(self.N-1):
-                    for j in range(i+1, self.N):
-                        self[i,j,0] = rand_edge(p)
-                #set lagged adjacencies
+                #set adjacencies using p
+                self.A*=rand_edges(p, size=self.shape)
+                #set auto-dependencies using p_auto
                 for t in self.lags[1:]:
                     for i in self.variables:
-                        for j in self.variables:
-                            self[i,j,t] = rand_edge(p_auto) if i==j else rand_edge(p)
+                        self[i,i,t] = rand_edges(p_auto)
                 if init_type=='no_feedback':
                     #removed lagged edges in reverse-topological order
                     self.A = self.triu()
@@ -790,7 +787,10 @@ class Graph(object):
             checked_paths = checked_paths | check_now
             Ek = Ek.dot(E) #examine paths of path_len+=1
 
-        return n_correctly_ordered_paths / n_paths
+        if n_paths == 0:
+            return 0.5
+        else:
+            return n_correctly_ordered_paths / n_paths
 
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
