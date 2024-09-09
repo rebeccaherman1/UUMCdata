@@ -11,6 +11,7 @@ import io
 import signal
 from contextlib import redirect_stdout, contextmanager
 import warnings
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
@@ -31,7 +32,7 @@ def time_lim(seconds):
     finally:
         signal.alarm(0)
 
-class Graph(object):
+class tsGraph(object):
     r"""Data-generation object, and methods for creating and manipulating them.
     Always contains a causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
     May also hold generated data after calling GEN_DATA.
@@ -69,6 +70,8 @@ class Graph(object):
     ___________________________
     AXIS_LABELS : dictionary
         names of the dimensions of the adjacency array and the dimension index.
+    graph_types_ : list
+        accepted inputs for init_type
     specified : shortcut for initializing graphs from a specified adjacency array
     gen_unitless_time_series : wrapper function for generating a large amount
                                of random data and associated ground-truth SCMs.
@@ -78,6 +81,88 @@ class Graph(object):
     """
     
     AXIS_LABELS = {'source': 0, 'sink': 1, 'time': 2, None:None}
+    graph_types_ = ['random', 'connected', 'disconnected', 'specified', 'no_feedback']
+
+
+    #functions acting on the adjacency matrix...
+    #returning a matrix or element
+    def _check_tuple(self, tpl):
+        if len(tpl)!=len(self.shape):
+            raise ValueError("tuple length must be {}".format(len(self.shape)))
+    def __getitem__(self, tpl):
+        self._check_tuple(tpl)
+        return self.A.__getitem__(tpl)
+    def __setitem__(self, tpl, v):
+        self._check_tuple(tpl)
+        return self.A.__setitem__(tpl,v)
+    def __eq__(self, G):
+        return (
+            isinstance(G, Graph) 
+            and self.N==G.N and self.tau_max==G.tau_max 
+            and (tsGraph.select_vars(self.A,self.topo_order)==tsGraph.select_vars(G.A, G.topo_order)).all()
+        )
+    def _pass_on_solo(self, func, axis=None):
+        if type(axis) is tuple:
+            return func(self.A, axis=tuple(tsGraph.AXIS_LABELS[a] for a in axis))
+        return func(self.A, axis=tsGraph.AXIS_LABELS[axis])
+    def sum(self, axis=None):
+        return self._pass_on_solo(np.sum, axis)
+    def any(self, axis=None):
+        return self._pass_on_solo(np.any, axis)
+    def inv(self):
+        return self._pass_on_solo(np.linalg.inv)
+
+    #returning a new graph
+    def _pass_on(self, func, other=None):
+        G_new = deepcopy(self)
+        if other is None:
+            G_new.A = func(self.A)
+        elif type(other) in [np.ndarray, float, int]:
+            G_new.A = func(self.A,other)
+        elif type(other) is Graph:
+            G_new.A = func(self.A,other.A)
+        else:
+            raise TypeError("{} is not supported for type Graph and type {}".format(
+                func,type(other)))
+        return G_new
+    def __abs__(self):
+        return tsGraph._pass_on(lambda x : x.__abs__())
+    def triu(self):
+        G_new = self*0
+        G_new.i_triu()
+        return G_new
+    def __add__(self, other):
+        return self._pass_on(lambda x,y : x+y, other)
+    def __sub__(self, other):
+        return self._pass_on(lambda x,y : x-y, other)
+    def __mul__(self, other):
+        return self._pass_on(lambda x,y : x*y, other)
+    def __truediv__(self, other):
+        return self._pass_on(lambda x,y : x/y, other)
+
+    #modifying the graph in place
+    def _i_pass_on(self, func, other=None):
+        if other is None:
+            self.A = func(self.A)
+        elif type(other) in [np.ndarray, float, int]:
+            self.A = func(self.A,other)
+        elif type(other) is Graph:
+            self.A = func(self.A,other.A)
+        else:
+            raise TypeError("{} is not supported for type Graph and type {}".format(
+                func,type(other)))
+        return self
+    def i_triu(self):
+        for i in self.lags:
+            self[:,:,i] = np.triu(self[:,:,i])
+    def __iadd__(self, other):
+        return self._i_pass_on(lambda x,y : x+y, other)
+    def __isub__(self, other):
+        return self._i_pass_on(lambda x,y : x-y, other)
+    def __imul__(self, other):
+        return self._i_pass_on(lambda x,y : x*y, other)
+    def __itruediv__(self,other):
+        return self._i_pass_on(lambda x,y : x/y, other)
     
     def __init__(self, N, tau_max, 
                  init_type='random', p=.5, p_auto=.8,
@@ -111,8 +196,7 @@ class Graph(object):
         topo_order : np.array of length N (default: None)
             Topological order for specified generation.
         """
-        types_ = ['random', 'connected', 'disconnected', 'specified', 'no_feedback']
-        Graph._check_option('init_type', types_, init_type)
+        tsGraph._check_option('init_type', self.graph_types_, init_type)
 
         #helper function definitions
         def adjust_p(p, tm):
@@ -142,8 +226,8 @@ class Graph(object):
 
         #initializion of the adjacency matrix and topological order
         if init_type=='specified':
-            Graph._check_given('adjacency matrix', init)
-            Graph._check_given('topological order', topo_order)
+            tsGraph._check_given('adjacency matrix', init)
+            tsGraph._check_given('topological order', topo_order)
             assert init.shape==self.shape, ("initialization matrix shape {} "
                  "not consistent with expected shape {}").format(init.shape, self.shape)
             self.A = init
@@ -152,29 +236,29 @@ class Graph(object):
             #Make a fully-connected graph
             self.A = np.ones(shape=self.shape)
             #remove contemporaneous cycles
-            self.A[:,:,0] *= (np.tril(self.A[:,:,0])==0)
+            self[:,:,0] *= (np.tril(self[:,:,0])==0)
             if init_type=='disconnected':
                 #make empty graph
-                self.A = self.A*0
+                self *= 0
             elif init_type!='connected': #random or no_feedback
-                Graph._check_given('edge probabilities', p)
+                tsGraph._check_given('edge probabilities', p)
                 if p_auto is None:
                     p_auto=p
                 p = adjust_p(p, self.tau_max+1)
                 p_auto = adjust_p(p_auto, self.tau_max)
                 #set adjacencies using p
-                self.A*=rand_edges(p, size=self.shape)
+                self*=rand_edges(p, size=self.shape)
                 #set auto-dependencies using p_auto
                 for t in self.lags[1:]:
                     for i in self.variables:
                         self[i,i,t] = rand_edges(p_auto)
                 if init_type=='no_feedback':
                     #removed lagged edges in reverse-topological order
-                    self.A = self.triu()
+                    self.i_triu()
             #randomize the order of appearance of the variables
             new_order = np.arange(self.N)
             np.random.shuffle(new_order)
-            self.A = Graph.select_vars(self.A, new_order)
+            self.A = tsGraph.select_vars(self.A, new_order)
             self.topo_order = np.argsort(new_order)
         #lists feedback loops by summary-graph topological order.
         #Additionally updates topo_order to match this where possible.
@@ -184,14 +268,13 @@ class Graph(object):
     @classmethod
     def specified(cls, init, topo_order, noise=None, labels=None):
         '''Helper function for initializing a graph from a specified adjacency matrix'''
-        return cls(init.shape[Graph.AXIS_LABELS['source']], init.shape[Graph.AXIS_LABELS['time']]-1, 
+        return cls(init.shape[tsGraph.AXIS_LABELS['source']], init.shape[tsGraph.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, topo_order=topo_order,
                    labels=labels,noise=noise)
     @classmethod
-    def ccopy(cls, G):
+    def copy(cls, G):
         '''Creates a new graph equivalent to the input graph G.'''
-        return cls(G.N, G.tau_max, labels=G.labels, 
-                   init_type='specified', init = G.A, topo_order=G.topo_order)
+        return deepcopy(G)
 
     @classmethod
     def gen_unitless_time_series(cls, N, tau_max, p=None, p_auto=None, T=1000, B=100, 
@@ -226,12 +309,12 @@ class Graph(object):
         text_trap = io.StringIO()
         while len(Gs)<B:
             all_errors = no_converge+unstable+diverge+TO
-            Graph._progress_message("{:.0%} completed ({} discarded)".format(
+            tsGraph._progress_message("{:.0%} completed ({} discarded)".format(
                                     len(Ds)/B, all_errors))
             try:
                 with time_lim(time_limit):
                     with redirect_stdout(text_trap):
-                        G = Graph(N, tau_max, init_type=init_type)
+                        G = tsGraph(N, tau_max, init_type=init_type)
                         G = G.gen_coefficients(convergence_attempts=2)
                         D = G.gen_data()
             except ConvergenceError:
@@ -341,7 +424,7 @@ class Graph(object):
         
         '''
         style_options = ['standardized', 'unit-variance-noise']
-        Graph._check_option('style', style_options, style)
+        tsGraph._check_option('style', style_options, style)
         self.style = style
         CO = self.components
         Bp_init = self.summary().astype(float)
@@ -370,7 +453,7 @@ class Graph(object):
                 raise ConvergenceError(("No solution found for above graph {}; "
                                         "tried {}x").format(id(self), discarded_c))
 
-            Graph._progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
+            tsGraph._progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
                                                            convergence_attempts))
 
             if self.style=='standardized':
@@ -413,7 +496,7 @@ class Graph(object):
                         calc_dicts = []
                         #construct system of equations
                         anc = self.ancestry()
-                        Ps = np.arange(self.N)[anc[:,c].any(axis=Graph.AXIS_LABELS['sink'])]
+                        Ps = np.arange(self.N)[anc[:,c].any(axis=tsGraph.AXIS_LABELS['sink'])]
                         def make_sigma_expression(t,j,i):
                             return (-RHOs[t,j,i] 
                                     + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
@@ -530,7 +613,7 @@ class Graph(object):
             M = Matrix(
                 np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
                 - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
-                         axis=Graph.AXIS_LABELS['time'])
+                         axis=tsGraph.AXIS_LABELS['time'])
             ).det()
             S = solve(M)
             stable = (np.array([Abs(s) for s in S])>1).all()
@@ -625,60 +708,6 @@ class Graph(object):
         self.data = TS
         return self.data
 
-    #functions acting on the adjacency matrix...
-    #returning a matrix or element
-    def _check_tuple(self, tpl):
-        if len(tpl)!=3:
-            raise ValueError("tuple length must be 3")
-    def __getitem__(self, tpl):
-        self._check_tuple(tpl)
-        return self.A.__getitem__(tpl)
-    def __setitem__(self, tpl, v):
-        self._check_tuple(tpl)
-        return self.A.__setitem__(tpl,v)
-    def __eq__(self, G):
-        return (
-            isinstance(G, Graph) 
-            and self.N==G.N and self.tau_max==G.tau_max 
-            and (Graph.select_vars(self.A,self.topo_order)==Graph.select_vars(G.A, G.topo_order)).all()
-        )
-    def _pass_on_solo(self, func, axis=None):
-        if type(axis) is tuple:
-            return func(self.A, axis=tuple(Graph.AXIS_LABELS[a] for a in axis))
-        return func(self.A, axis=Graph.AXIS_LABELS[axis])
-    def sum(self, axis=None):
-        return self._pass_on_solo(np.sum, axis)
-    def any(self, axis=None):
-        return self._pass_on_solo(np.any, axis)
-    def inv(self):
-        return self._pass_on_solo(np.linalg.inv)
-    def triu(self):
-        A_new = np.zeros(self.shape)
-        for i in self.lags:
-            A_new[:,:,i] = np.triu(self[:,:,i])
-        return A_new
-
-    #returning a new graph
-    def _pass_on(self, other, func):
-        if type(other) in [np.ndarray, float, int]:
-            new = func(self.A,other)
-        elif type(other) is Graph:
-            new = func(self.A,other.A)
-        else:
-            raise TypeError("{} is not supported for type Graph and type {}".format(
-                func,type(other)))
-        return Graph._sim_graph(self, new)
-    def __abs__(self):
-        return Graph._sim_graph(self, self.A.__abs__())
-    def __add__(self, other):
-        return self._pass_on(other, lambda x,y : x+y)
-    def __sub__(self, other):
-        return self._pass_on(other, lambda x,y : x-y)
-    def __mul__(self, other):
-        return self._pass_on(other, lambda x,y : x*y)
-    def __truediv__(self, other):
-        return self._pass_on(other, lambda x,y : x/y)
-
     #functions with graph logic
     def order(self, i):
         '''returns the placement of the variable at index i in the topological order'''
@@ -692,7 +721,7 @@ class Graph(object):
         '''Returns an np.array of length N containing the number of parent processes 
         of each variable (in the summary graph)'''
         S = self.summary()
-        return np.sum(S, axis=Graph.AXIS_LABELS['source'])
+        return np.sum(S, axis=tsGraph.AXIS_LABELS['source'])
     
     def ancestry(self):
         r'''Returns an N x N matrix summarizing ancestries in the summary graph.
@@ -717,7 +746,7 @@ class Graph(object):
         '''
         idn = np.arange(self.N)
         anc = self.ancestry()
-        cycles = np.triu(Graph._remove_diagonal(anc*anc.T))
+        cycles = np.triu(tsGraph._remove_diagonal(anc*anc.T))
         collected_cycles = []
         id_used = idn.astype(bool)*False
         for i in idn:
@@ -728,9 +757,9 @@ class Graph(object):
             id_used = np.array([any([j in c for c in collected_cycles])
                                 for j in idn]).squeeze()
         idc = np.array([c[0] for c in collected_cycles])
-        c_anc = Graph._remove_diagonal(Graph.select_vars(anc, idc))
-        num_ancestors = np.sum(c_anc, axis=Graph.AXIS_LABELS['source'])
-        num_descendents = np.sum(c_anc, axis=Graph.AXIS_LABELS['sink'])
+        c_anc = tsGraph._remove_diagonal(tsGraph.select_vars(anc, idc))
+        num_ancestors = np.sum(c_anc, axis=tsGraph.AXIS_LABELS['source'])
+        num_descendents = np.sum(c_anc, axis=tsGraph.AXIS_LABELS['sink'])
         cycle_order = np.argsort(num_ancestors)
         summary_order = [self.topo_order[np.sort(np.concatenate([self.order(e)
                                                                  for e in collected_cycles[i]]))]
@@ -955,7 +984,7 @@ class TimeSeries(object):
 
 if __name__ == '__main__':
     '''Beta. to be updated.'''
-    Gs, Ds, text_trap = Graph.gen_unitless_time_series(10, 1, B=10)
+    Gs, Ds, text_trap = tsGraph.gen_unitless_time_series(10, 1, B=10)
     print(text_trap.getvalue())
     axs = plt.figure(figsize=(7,6), layout="constrained").subplots(2,2)
     plt.subplot(2,2,1)
