@@ -458,7 +458,7 @@ class tsGraph(object):
 
             if self.style=='standardized':
                 #initial draws
-                self.A*=np.random.normal(size=self.shape)
+                self*=np.random.normal(size=self.shape)
                 Bp=Bp_init*np.random.normal(size=Bp_init.shape)
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -566,7 +566,7 @@ class tsGraph(object):
                         #second update
                         for i in c:
                             Cs[i] = Cs[i].subs(S_dict_local)
-                            self[:,i,:]=self[:,i,:]*r[i]/Cs[i]
+                            self[:,i,:] = self[:,i,:]*r[i]/Cs[i]
                             RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
                             RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
                         
@@ -602,11 +602,8 @@ class tsGraph(object):
                     continue
 
             else:
-                self.A*=np.random.uniform(low=.2, high=2, size=self.shape)
-                for i in self.variables:
-                    for j in self.variables:
-                        for k in self.lags:
-                            self[i,j,k]*=np.random.choice(np.array([1,-1]))
+                self *= np.random.uniform(low=.2, high=2, size=self.shape)
+                self *= np.random.choice(a=[-1,1], size=self.shape)
             
             #stability check
             z = Symbol("z")
