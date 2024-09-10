@@ -33,6 +33,47 @@ def time_lim(seconds):
         signal.alarm(0)
 
 class Graph(object):
+    r"""Data-generation object, and methods for creating and manipulating them.
+    Always contains a causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
+    May also hold generated data after calling GEN_DATA.
+    
+    Parameters
+    _______________________________
+    N : int
+        Number of random variables
+    A : (N x N) np.array
+        A[i,j] is the effect of X_i on X_j.
+        When entries are 0 and 1, this is an adjacency matrix.
+        Otherwise, it is a causal coeficients matrix.
+    s2 : np.array of length N
+        Noise variances (if set or calculated)
+    topo_order : np.array of length N
+        topological order of the variables
+    cov : (N x N) np.array
+        Theoretical covariance matrix (if coeficients are generated).
+        cov[i,j] is the covariance of X_i(t) and X_j(t+v), 
+        where v can be negative.
+    data : Data object
+        data generated from this SCM (if generated)
+    variables : iterable over variable indices
+    shape = A.shape = (N x N)
+    style : SCM generation strategy
+
+    Class Constants
+    _______________
+    AXIS_LABELS : dictionary
+        names of the dimensions of the adjacency array and the dimension index.
+    graph_types_ : list
+        accepted inputs for init_type
+    generation_options : list
+        accepted options for gen_coefficients
+    
+    specified : shortcut for initializing graphs from a specified adjacency array
+    ccopy : creates a copy of the current SCM
+    select_vars : select a subset of the adjacency array showing direct effects
+                  between the specified variables.
+    """
+    #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
     graph_types_ = ['random', 'connected', 'disconnected', 'specified']
     generation_options = ['standardized', 'unit-variance-noise']
@@ -72,66 +113,136 @@ class Graph(object):
             #randomize the order of appearance of the variables
             self.shuffle()
 
-    #initialiation helper functions for overriding in children classes
-    def _make_shape(self):
-        self.shape = tuple((self.N, self.N))
+    #User-available retrieval functions
+    def get_adjacencies(self):
+        '''returns an NxN boolean matrix where A[i,j]=True if X_i --> X_j'''
+        return self.A != 0
+    def order(self, i):
+        '''returns the placement of the variable at index i in the topological order'''
+        return np.where(self.topo_order==i)[0]
+    def get_num_parents(self):
+        '''Returns an np.array of length N containing the number of parent processes 
+        of each variable (in the summary graph)'''
+        return self.sum(matrix=self.get_adjacencies(), axis='source')
+    def ancestry(self):
+        r'''Returns an N x N matrix summarizing ancestries in the summary graph.
+        The i,j-th is True if X_i is an ancestor of X_j and False otherwise.
+        '''
+        E = self.get_adjacencies()
+        Ek = E.copy()
+        all_paths = Ek.copy()*False
+        for path_len in range(self.N - 1):
+            all_paths = all_paths | Ek
+            Ek = Ek.dot(E)
+        return all_paths
+    def select_vars(self, V, A=None):
+        r'''Subset and/or reorder the adjacency array or an alternative array A
+        via indices V'''
+        if A is None:
+            A = self.A
+        return A[V,:][:,V]
+
+    #user-available modification functions
+    def shuffle(self):
+        '''Randomly shuffles the order of the variables.'''
+        new_order = np.arange(self.N)
+        np.random.shuffle(new_order)
+        self.A = self.select_vars(new_order)
+        self.topo_order = np.argsort(new_order)
         return
+    def gen_coefficients(self, style='standardized'):
+        r'''Creates an SCM from the graph using one of two generation styles:
+            standardized : Procudes unsortable standardized SCMs. introduced here, recommended.
+            unit-variance-noise : Draws coefficients from a uniform distribution and sets all
+                                  noise variances to 1. typically used, here for comparison.
+        '''
+        self._check_option('style', self.generation_options, style)
+        self.style = style
+        if self.style=='standardized':
+            self._gen_coefficients_standardized()
+        else:
+            self._gen_coefficients_UVN()
+        return self
+    def gen_data(self, P):
+        '''Generates and returns a dataset with P observations from the current SCM'''
+        #calculate noises
+        X = np.random.normal(scale=self.s2.reshape(self.N,1), size=(self.N,P))
+        #add dependencies
+        for i in self.topo_order[1:]:
+            X[[i],:]+=np.matmul(self[:,[i]].T,X)
+        self.data = Data(self.N, P, self.labels, X)
+        return self.data
 
-    def _make_specified(self, init, topo_order):
-        self._check_given('adjacency matrix', init)
-        self._check_given('topological order', topo_order)
-        assert init.shape==self.shape, ("initialization matrix shape {} "
-             "not consistent with expected shape {}").format(init.shape, self.shape)
-        self.A = init
-        self.topo_order = topo_order
-        #Note: I am not checking fot incorrect topological orders
-        return
+    #user-available analysis functions
+    def sortability(self, func='var', tol=1e-9):
+        '''Calculates sortability of variables in the SCM according to a 
+        funtion of the user's choice on the generated data. The code is based on code 
+        found at <https://github.com/Scriddie/Varsortability>, in reference to 
+        Reisach, A. G., Seiler, C., & Weichwald, S. (2021). "Beware of the Simulated DAG! 
+        Causal Discovery Benchmarks May Be Easy To Game" (arXiv:2102.13647). Reisach's 
+        definition of sortability has been modified to avoid double-counting the pair-wise 
+        sortability of two variables with multiple causal paths between them, and has been 
+        further modified to accept cyclic graphs in the manner described by Christopher 
+        Lohse and Jonas Wahl in "Sortability of Time Series Data" (Submitted to the Causal 
+        Inference for Time Series Data Workshop at the 40th Conference on Uncertainty in 
+        Artificial Intelligence.). 
 
-    def _remove_cycles(self):
-        self *= (np.tril(self.A)==0)
+        Function options include:
+            'var' : variance 
+            'R2' : Predictability from other variables, as in Reisach et al.
+        These functions are defined in the Data class.
+        '''
+        self._check_option('func', self.data.analysis_options, func)
+        E = self.get_adjacencies()
+        anc = self.ancestry()
+        Ek = E.copy()
+        F = getattr(self.data, func)
+        M = F()
+        n_paths = 0
+        n_correctly_ordered_paths = 0
+        checked_paths = Ek.copy()*False
 
-    def _rand_edges(self, p, size=None):
-        return np.random.choice(a=[1,0], size=size, p=[p, 1-p])
+        for path_len in range(self.N - 1):
+            check_now = (Ek 
+                         & ~ checked_paths # to avoid double counting
+                         & ~ anc.T) #to avoid comparison within a cycle
+            n_paths += (check_now).sum()
+            n_correctly_ordered_paths += (check_now * M.T / M > 1 + tol).sum()
+            n_correctly_ordered_paths += 1/2*(
+                (check_now * M.T / M <= 1 + tol) *
+                (check_now * M.T / M >=  1 - tol)).sum()
+            checked_paths = checked_paths | check_now
+            Ek = Ek.dot(E) #examine paths of path_len+=1
 
-    def _make_random(self, p):
-        self*=self._rand_edges(p, size=self.shape)
+        if n_paths == 0:
+            return 0.5
+        else:
+            return n_correctly_ordered_paths / n_paths
 
-    def _get_num_lags(self):
-        return 1
-
-    def _make_table_titles(self):
-        return np.array(["Coefficient"])
-    
     #functions acting on the adjacency matrix...
     #returning a matrix or element
-    def _check_tuple(self, tpl):
-        if len(tpl)==len(self.shape)+1 and tpl[-1]==slice(None, None, None):
-            return tpl[:-1]
-        elif len(tpl)!=len(self.shape):
-            raise ValueError("tuple length must be {}".format(len(self.shape)))
-        return tpl
     def __getitem__(self, tpl):
-        tpl = self._check_tuple(tpl)
         return self.A.__getitem__(tpl)
     def __setitem__(self, tpl, v):
-        tpl = self._check_tuple(tpl)
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
         return (
             isinstance(G, Graph) 
             and self.N==G.N
-            and (self.select_vars(self.A,self.topo_order)==self.select_vars(G.A, G.topo_order)).all()
+            and (self.select_vars(self.topo_order)==G.select_vars(G.topo_order)).all()
         )
-    def _pass_on_solo(self, func, axis=None):
+    def _pass_on_solo(self, func, axis=None, matrix=None):
+        if matrix is None:
+            matrix=self.A.copy()
         if type(axis) is tuple:
-            return func(self.A, axis=tuple(self.AXIS_LABELS[a] for a in axis))
-        return func(self.A, axis=self.AXIS_LABELS[axis])
-    def sum(self, axis=None):
-        return self._pass_on_solo(np.sum, axis)
-    def any(self, axis=None):
-        return self._pass_on_solo(np.any, axis)
-    def inv(self):
-        return self._pass_on_solo(np.linalg.inv)
+            return func(matrix, axis=tuple(self.AXIS_LABELS[a] for a in axis))
+        return func(matrix, axis=self.AXIS_LABELS[axis])
+    def sum(self, axis=None, matrix=None):
+        return self._pass_on_solo(np.sum, axis, matrix)
+    def any(self, axis=None, matrix=None):
+        return self._pass_on_solo(np.any, axis, matrix)
+    def inv(self, matrix=None):
+        return self._pass_on_solo(np.linalg.inv, matrix=matrix)
 
     #returning a new graph
     def _pass_on(self, func, other=None):
@@ -160,6 +271,8 @@ class Graph(object):
         return self._pass_on(lambda x,y : x*y, other)
     def __truediv__(self, other):
         return self._pass_on(lambda x,y : x/y, other)
+    def __pow__(self, other):
+        return self._pass_on(lambda x,y : x**y, other)
 
     #modifying the graph in place
     def _i_pass_on(self, func, other=None):
@@ -184,21 +297,48 @@ class Graph(object):
         return self._i_pass_on(lambda x,y : x*y, other)
     def __itruediv__(self,other):
         return self._i_pass_on(lambda x,y : x/y, other)
-
-    @classmethod
-    def _remove_diagonal(cls, M):
-        '''removes the diagonal from a 2D array M'''
-        return M & ~np.diag(np.diag(M))
-    @classmethod
-    def _check_option(cls, name, options, chosen):
-        '''checks that a valid keyword is chosen'''
-        if chosen not in options:
-            raise ValueError("Valid choices for {} include {}".format(name, options))
+    def __ipow__(self, other):
+        return self._i_pass_on(lambda x,y : x**y, other)
+    
+    #Initialization Helper Functions
+    def _rand_edges(self, p, size=None):
+        return np.random.choice(a=[1,0], size=size, p=[p, 1-p])
     @classmethod
     def _check_given(cls, name, value):
         '''Checks that an optional input is specified'''
         if value is None:
             raise ValueError("Please specify {}".format(name))
+    
+    #...for overriding in children classes
+    def _make_shape(self):
+        self.shape = tuple((self.N, self.N))
+        return
+    def _remove_cycles(self):
+        self *= (np.tril(self.A)==0)
+    def _make_random(self, p):
+        self*=self._rand_edges(p, size=self.shape)
+    def _make_specified(self, init, topo_order):
+        self._check_given('adjacency matrix', init)
+        self._check_given('topological order', topo_order)
+        assert init.shape==self.shape, ("initialization matrix shape {} "
+             "not consistent with expected shape {}").format(init.shape, self.shape)
+        self.A = init
+        self.topo_order = topo_order
+        #Note: I am not checking fot incorrect topological orders
+        return
+
+
+    #Not used!
+    @classmethod
+    def _remove_diagonal(cls, M):
+        '''removes the diagonal from a 2D array M'''
+        return M & ~np.diag(np.diag(M))
+    #used later
+    @classmethod
+    def _check_option(cls, name, options, chosen):
+        '''checks that a valid keyword is chosen'''
+        if chosen not in options:
+            raise ValueError("Valid choices for {} include {}".format(name, options))
     @classmethod
     def _progress_message(cls, msg):
         '''Progress update that modifies in place'''
@@ -206,117 +346,57 @@ class Graph(object):
         sys.stdout.write(msg)
         sys.stdout.flush()
 
-    @classmethod
-    def select_vars(cls, A, V):
-        r'''Direct effects between a subset of the variables.
-        
-        Parameters
-        __________
-        A : an adjacency matrix
-        V : np.array of variable indices
-
-        Returns an array of shape (len(V), len(V)) if A is 2-D, 
-        or an array of shape (len(V), len(V), A.shape[-1]) if A is 3-D
-        '''
-        if len(A.shape)==3:
-            return A[V,:,:][:,V,:]
-        elif len(A.shape)==2:
-            return A[V,:][:,V]
-        else:
-            raise ValueError(("A must be 2- or 3-dimensional, "
-                              "not {}-dimensional").format(len(A.shape)))
-
-    def shuffle(self):
-        new_order = np.arange(self.N)
-        np.random.shuffle(new_order)
-        self.A = Graph.select_vars(self.A, new_order)
-        self.topo_order = np.argsort(new_order)
-        return
-
-    def gen_coefficients(self, style='standardized'):
-        self._check_option('style', self.generation_options, style)
-        self.style = style
-
-    def summary(self):
-        #for iid graphs, the summary is A, the adjacency matrix
-        return (self.A != 0).astype(int)
-
-    def get_num_parents(self):
-        '''Returns an np.array of length N containing the number of parent processes 
-        of each variable (in the summary graph)'''
-        S = self.summary()
-        return np.sum(S, axis=tsGraph.AXIS_LABELS['source'])
-
-    def ancestry(self):
-        r'''Returns an N x N matrix summarizing ancestries in the summary graph.
-        The i,j-th is True if X_i is an ancestor of X_j and False otherwise.
-        '''
-        E = self.summary() != 0
-        Ek = E.copy()
-        all_paths = Ek.copy()*False
-        for path_len in range(self.N - 1):
-            all_paths = all_paths | Ek
-            Ek = Ek.dot(E)
-        return all_paths
-
-    def sortability(self, func='var', tol=1e-9):
-        '''Calculates time-series sortability of variables in the SCM according to a 
-        funtion of the user's choice on the generated data. The code is based on code 
-        found at <https://github.com/Scriddie/Varsortability>, in reference to 
-        Reisach, A. G., Seiler, C., & Weichwald, S. (2021). "Beware of the Simulated DAG! 
-        Causal Discovery Benchmarks May Be Easy To Game" (arXiv:2102.13647). Reisach's 
-        definition of sortability has been modified to avoid double-counting the pair-wise 
-        sortability of two variables with multiple causal paths between them, and has been 
-        further modified to accept time series data in the manner described by Christopher 
-        Lohse and Jonas Wahl in "Sortability of Time Series Data" (Submitted to the Causal 
-        Inference for Time Series Data Workshop at the 40th Conference on Uncertainty in 
-        Artificial Intelligence.). 
-
-        Function options include:
-            'var' : variance over time, as in Lohse and Wahl; analogous to Reisach et al.
-            'R2_summary' : Predictability from the past and present of distinct processes,
-                           as in Lohse and Wahl.
-            'R2' : Predictability from distinct processes and the process's own past.
-                   Introduced here; analogous to Reisach et al.
-        These functions are defined in the TimeSeries class.
-        '''
-        func_options = ['var', 'R2', 'R2_summary']
-        E = self.summary() != 0
-        anc = self.ancestry()
-        Ek = E.copy()
-        if func=='var':
-            var = self.data.var()
-        elif func=='R2':
-            var = self.data.R2(self.tau_max, summary=False)
-        elif func=='R2_summary':
-            var = self.data.R2(self.tau_max, summary=True)
-        else:
-            raise ValueError("For func, please choose between {}".format(func_options))
-
-        n_paths = 0
-        n_correctly_ordered_paths = 0
-        checked_paths = Ek.copy()*False
-
-        for path_len in range(self.N - 1):
-            check_now = (Ek 
-                         & ~ checked_paths # to avoid double counting
-                         & ~ anc.T) #to avoid comparison within a cycle
-            n_paths += (check_now).sum()
-            n_correctly_ordered_paths += (check_now * var.T / var > 1 + tol).sum()
-            n_correctly_ordered_paths += 1/2*(
-                (check_now * var.T / var <= 1 + tol) *
-                (check_now * var.T / var >=  1 - tol)).sum()
-            checked_paths = checked_paths | check_now
-            Ek = Ek.dot(E) #examine paths of path_len+=1
-
-        if n_paths == 0:
-            return 0.5
-        else:
-            return n_correctly_ordered_paths / n_paths
+    #gen_coefficients helper functions
+    def _gen_coefficients_UVN(self):
+        raise ValueError("NOT YET IMPLEMENTED")
+    def _gen_coefficients_standardized(self):
+        self._reset_adjacency_matrix()
+        self._reset_cov()
+        self._reset_s2()
+        P = self.get_num_parents()
+        A, r = self._initial_draws(P)
+        self *= A
+        self._rescale_coefficients(r, P)
+    def _reset_adjacency_matrix(self):
+        self.A = self.A != 0
+    def _reset_cov(self):
+        self.cov = np.diag(np.ones((self.N,)))
+    def _reset_s2(self):
+        self.s2 = np.ones((self.N,))  
+    def _initial_draws(self, P):
+        A = np.random.normal(size=self.shape) #coefficient draws -- a'
+        r = np.random.uniform(size=(self.N,)) #starting draws -- r
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r=r**(1/P)
+        return A, r
+    def _re_sort(self, matrix=None):
+        if matrix is None:
+            matrix=self.A
+        return self.select_vars(np.argsort(self.topo_order), A=matrix)
+    def _rescale_coefficients(self, r, P):
+        #Need to go through by topological order!
+        ind_length = (self**2).sum(axis='source') #constant when parents are independent
+        loc_cov = self.select_vars(self.topo_order, A=self.cov)
+        A_loc = self.select_vars(self.topo_order)
+        for it, i in enumerate(self.topo_order):
+            if P[i]==0:
+                continue
+            Ap = A_loc[:it,[it]]
+            r_i = r[i]
+            norm = ind_length[i]
+            R_i = loc_cov[:it,:it]
+            Ci = ((r_i**2*np.matmul(np.matmul(Ap.T, R_i), Ap) + (1-r_i**2)*norm)**.5)[0,0]
+            A_loc[:,it] *= r_i/Ci
+            self.s2[i] = ((1-r_i**2)*norm)**.5/Ci
+            loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
+            loc_cov[it,:] = loc_cov[:,it]
+        self.cov = self._re_sort(loc_cov)
+        self.A = self._re_sort(A_loc)
 
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
-        S = self.summary()
+        S = self.get_adjacencies()
         summary_edges = np.sum(S)
         DAG_width = 3
         N_CUTOFF = 8
@@ -324,7 +404,7 @@ class Graph(object):
             DAG_width *= self.N/N_CUTOFF
         MAX_ROWS = int(np.floor(5*DAG_width))
         Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
-        Table_width = .75*self._get_num_lags()+.5
+        Table_width = .75*self._get_num_cols()+.5
         if summary_edges > 0:
             num_tables = int(np.ceil(Table_height/DAG_width))
             w_space_frac = .05
@@ -360,7 +440,7 @@ class Graph(object):
         def make_table_contents(table_id, summary_edges):
             remaining_edges = summary_edges - table_id*ROWS_PER_TABLE
             num_rows = min([remaining_edges, ROWS_PER_TABLE])
-            rep = np.zeros((num_rows, self._get_num_lags())).astype(object)
+            rep = np.zeros((num_rows, self._get_num_cols())).astype(object)
             ri = np.zeros((num_rows,)).astype(object)
             r = 0
             return rep, ri, r
@@ -395,7 +475,7 @@ class Graph(object):
                                                          connectionstyle=connectionstyle)
                         ax[0].add_artist(arrow)
                         ri[r] = "{}-->{}".format(i,j)
-                        rep[r,:]=np.array([str(round(a,3)) for a in self[i,j,:]])
+                        rep[r,:]=np.array([str(round(a,3)) for a in self._get_coefficients(i, j)])
                         if self.order(j)<=self.order(i):
                             rep[r,0]=np.nan
                         r+=1
@@ -407,13 +487,21 @@ class Graph(object):
                             
         return "Graph {}".format(id(self))
 
+    #Display helper functions for overwriting
+    def _get_num_cols(self):
+        return 1
+    def _make_table_titles(self):
+        return np.array(["Coefficient"])
+    def _get_coefficients(self, i, j):
+        return [self[i,j]]
+
 class tsGraph(Graph):
     r"""Data-generation object, and methods for creating and manipulating them.
     Always contains a causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
     May also hold generated data after calling GEN_DATA.
     
     Parameters
-    _______________________________
+    __________
     N : int
         Number of random variables
     tau_max : int
@@ -432,7 +520,7 @@ class tsGraph(Graph):
         ordered according to a valid topological ordering on the summary graph.
     cov : (2*tau_max+1 x N x N) np.array
         Theoretical covariance matrix (if coeficients are generated).
-        cov[i,j,v] is the covariance of X_i(t) and X_j(t+v), 
+        cov[v,i,j] is the covariance of X_i(t) and X_j(t+v), 
         where v can be negative.
     data : TimeSeries object
         data generated from this SCM (if generated)
@@ -459,7 +547,7 @@ class tsGraph(Graph):
     graph_types_ = Graph.graph_types_ + ['no_feedback']
     
     def __init__(self, N, tau_max, 
-                 init_type='random', p=.5, p_auto=.8,
+                 init_type='random', p=.5, p_auto=.8, #TODO change p_auto default to None?
                  init=None, noise=None, labels=None, topo_order=None):
         """
         Optional Parameters
@@ -499,8 +587,28 @@ class tsGraph(Graph):
         #Additionally updates topo_order to match this where possible.
         self.components = self.summary_order()
 
+    def sortability(self, func='var', tol=1e-9):
+        r'''
+        Function options include:
+            'var' : variance over time, as in Lohse and Wahl; analogous to Reisach et al.
+            'R2_summary' : Predictability from (the past and present of) distinct processes,
+                           as in Lohse and Wahl.
+            'R2' : Predictability from distinct processes and the process's own past.
+                   Introduced here; analogous to Reisach et al.
+        These functions are defined in the TimeSeries class.
+        '''
+        self.data.tau_max = self.tau_max
+        R = super().sortability(func=func, tol=tol)
+        return R
+
+    def _get_coefficients(self, i, j):
+        return self[i,j]
+
     def _get_num_lags(self):
         return len(self.lags)
+
+    def _get_num_cols(self):
+        return self._get_num_lags()
 
     def _make_shape(self):
         self.shape = tuple((self.N, self.N, self._get_num_lags()))
@@ -621,8 +729,172 @@ class tsGraph(Graph):
         but with a modified agencency matrix A.'''
         return cls(G.N, A.shape[-1]-1, labels=G.labels, 
                    init_type='specified', init = A, topo_order=G.topo_order)
-        
-    def gen_coefficients(self, convergence_attempts=10, style='standardized'):
+
+    def _gen_coefficients_standardized(self, P, Bp_init, CO):
+        #initial draws
+        self*=np.random.normal(size=self.shape)
+        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r = np.random.uniform(size=(self.N,))**(1/P)
+
+        #first update
+        B = self.sum(axis='time')
+        for i in self.variables:
+            for j in self.variables:
+                if B[i,j]!=0:
+                    self[i,j]*=Bp[i,j]/B[i,j]
+
+        #construct symbols
+        Cs = symbols(["C"+str(i) for i in self.variables])
+        RHOs = (np.ones((2*self.tau_max+1, self.N, self.N))*np.nan).astype(object)
+        for i in self.variables:
+            RHOs[0,i,i] = 1
+        for i in range(self.N-1):
+            for j in range(i+1,self.N):
+                [i_t, j_t] = self.topo_order[[i,j]]
+                RHOs[0,i_t, j_t] = self._R_symbol(i_t,j_t,0)
+                RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
+        RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
+                                                  for j in self.variables] 
+                                                 for t in self.lags[1:]])
+        RHOs[self.tau_max,:,self.topo_order[-1]]=0
+        for t in range(-self.tau_max, 0):
+            RHOs[t,:,:] = RHOs[-t,:,:].T
+
+        Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
+        Bps[Bps==0]=1
+                    
+        for idc, c in enumerate(CO):
+            calc_dicts = []
+            #construct system of equations
+            anc = self.ancestry()
+            Ps = np.arange(self.N)[self.any(matrix=anc[:,c], axis='sink')]
+            def make_sigma_expression(t,j,i):
+                return (-RHOs[t,j,i] 
+                        + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
+                                                       for k in self.variables] 
+                                                      for v in self.lags])))
+            last = np.max(np.array([self.order(i) for i in list(c)]))
+            so_far = CO[:idc] #+1
+            if len(so_far)>0:
+                so_far = np.concatenate(so_far) #+1
+                now_look =np.concatenate([so_far,c])
+            else:
+                now_look = c
+            def to_include(j,i,t):
+                if t==0 and self.order(i)<=self.order(j):
+                    return False
+                if t==self.tau_max and self.order(i)>=last:
+                    return False
+                if j in c:
+                    return i in Ps
+                elif i in c:
+                    return j in Ps
+                return False
+            def to_calc(j,i,t):
+                if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
+                    return True
+                if j in c:
+                    return i not in Ps
+                elif i in c:
+                    return j not in Ps
+                return False
+            s_exp = [-Cs[i]**2 
+                     + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
+                                                   for j in self.variables] 
+                                                  for k in self.variables]
+                                                 for t in self.lags]
+                                                for v in self.lags])) 
+                      + (1-r[i]**2)*Bps[i] for i in c]
+            s_exp += [make_sigma_expression(0,j,i) 
+                      for i in now_look
+                      for j in now_look
+                      if to_include(j,i,0)]
+            s_exp += [make_sigma_expression(self.tau_max, j, i) 
+                      for i in now_look 
+                      for j in now_look
+                      if to_include(j,i,self.tau_max)]
+            s_exp += [make_sigma_expression(t,j,i) 
+                      for i in now_look
+                      for j in now_look
+                      for t in self.lags[1:]
+                      if to_include(j,i,t)]
+            cxs = np.array([n in now_look for n in self.variables])
+            rho_loc = list(set(RHOs[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
+            cxs_small = np.array([n in now_look if self.order(n)<last else False 
+                                  for n in self.variables])
+            rho_loc += list(set(RHOs[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
+            rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                    and Matrix(s_exp).has(rho))]
+            rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                    and not Matrix(s_exp).has(rho))]
+            now_vars = [Cs[cx] for cx in c] + rho_loc_1
+            
+            #solve
+            self._check_vars(now_vars, s_exp)
+            SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
+            S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
+
+            #second update
+            for i in c:
+                Cs[i] = Cs[i].subs(S_dict_local)
+                self[:,i] = self[:,i]*r[i]/Cs[i]
+                RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
+                RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
+            
+            #calculate some more!
+            calc_dict = {}
+            last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
+            for j in now_look:
+                for i in now_look:
+                    for t in self.lags:
+                        if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
+                            calc_dict[RHOs[t,j,i]]=r[i]/Cs[i] \
+                                                   *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k]
+                                                                      for k in now_look]
+                                                                     for v in self.lags]))
+            exp_here = [-k + v for k, v in calc_dict.items()]
+            ks = list(calc_dict.keys())
+            if len(exp_here)>0:
+                self._check_vars(ks, exp_here)
+                SH = nsolve(exp_here, ks, [0 for i in ks])
+                calc_dict = {k: SH[i] for i, k in enumerate(ks)}
+                calc_dicts+=[calc_dict]
+                for i in c:
+                    RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(calc_dict))
+                    RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(calc_dict))
+
+        if not self._check_vars([], Matrix(np.sum(RHOs, axis=2))):
+            for cd in calc_dicts:
+                for k, v in cd.items():
+                    print("{}: {}".format(k,v))
+
+        return RHOs, Bp, Cs, r
+
+    def _gen_coefficients_UVN(self, low=.2, high=2):
+        self *= np.random.uniform(low=low, high=high, size=self.shape)
+        self *= np.random.choice(a=[-1,1], size=self.shape)
+
+    def _check_stability(self):
+        z = Symbol("z")
+        M = Matrix(
+            np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
+            - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
+                     axis=tsGraph.AXIS_LABELS['time'])
+        ).det()
+        S = solve(M)
+        return (np.array([Abs(s) for s in S])>1).all()
+
+    def _R_symbol(self, i,j,l):
+        return Symbol("R{}.{}({})".format(i,j,l))
+    def _check_vars(self, now_vars, s_exp):
+        missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
+        if len(missing_vars)>0:
+            print("MISSING VARIABLES! {}".format(missing_vars))
+        return len(missing_vars)==0
+
+    def gen_coefficients(self, style='standardized', convergence_attempts=10):
         r'''Generate a random SCM from a causal graph.
 
         Parameters
@@ -653,22 +925,15 @@ class tsGraph(Graph):
         convergence_attempts times to find a stable solution.
         
         '''
-        super().gen_coefficients(style=style)
+        self._check_option('style', self.generation_options, style)
+        self.style = style
         CO = self.components
-        Bp_init = self.summary().astype(float)
+        Bp_init = self.get_adjacencies().astype(float)
         P = self.get_num_parents()
         
         stable = False
         discarded_u = 0
         discarded_c = 0
-
-        def R_symbol(i,j,l):
-            return Symbol("R{}.{}({})".format(i,j,l))
-        def check_vars(now_vars, s_exp):
-            missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
-            if len(missing_vars)>0:
-                print("MISSING VARIABLES! {}".format(missing_vars))
-            return len(missing_vars)==0
 
         A_init = (self.A != 0).astype(float)
         while not stable:
@@ -685,163 +950,14 @@ class tsGraph(Graph):
                                                            convergence_attempts))
 
             if self.style=='standardized':
-                #initial draws
-                self*=np.random.normal(size=self.shape)
-                Bp=Bp_init*np.random.normal(size=Bp_init.shape)
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    r = np.random.uniform(size=(self.N,))**(1/P)
-    
-                #first update
-                B = self.sum(axis='time')
-                for i in self.variables:
-                    for j in self.variables:
-                        if B[i,j]!=0:
-                            self[i,j,:]*=Bp[i,j]/B[i,j]
-    
-                #construct symbols
-                Cs = symbols(["C"+str(i) for i in self.variables])
-                RHOs = (np.ones((2*self.tau_max+1, self.N, self.N))*np.nan).astype(object)
-                for i in self.variables:
-                    RHOs[0,i,i] = 1
-                for i in range(self.N-1):
-                    for j in range(i+1,self.N):
-                        [i_t, j_t] = self.topo_order[[i,j]]
-                        RHOs[0,i_t, j_t] = R_symbol(i_t,j_t,0)
-                        RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
-                RHOs[1:(self.tau_max+1),:,:] = np.array([[[R_symbol(j,k,t) for k in self.variables] 
-                                                          for j in self.variables] 
-                                                         for t in self.lags[1:]])
-                RHOs[self.tau_max,:,self.topo_order[-1]]=0
-                for t in range(-self.tau_max, 0):
-                    RHOs[t,:,:] = RHOs[-t,:,:].T
-    
-                Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
-                Bps[Bps==0]=1
-                            
                 try:
-                    for idc, c in enumerate(CO):
-                        calc_dicts = []
-                        #construct system of equations
-                        anc = self.ancestry()
-                        Ps = np.arange(self.N)[anc[:,c].any(axis=tsGraph.AXIS_LABELS['sink'])]
-                        def make_sigma_expression(t,j,i):
-                            return (-RHOs[t,j,i] 
-                                    + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
-                                                                   for k in self.variables] 
-                                                                  for v in self.lags])))
-                        last = np.max(np.array([self.order(i) for i in list(c)]))
-                        so_far = CO[:idc] #+1
-                        if len(so_far)>0:
-                            so_far = np.concatenate(so_far) #+1
-                            now_look =np.concatenate([so_far,c])
-                        else:
-                            now_look = c
-                        def to_include(j,i,t):
-                            if t==0 and self.order(i)<=self.order(j):
-                                return False
-                            if t==self.tau_max and self.order(i)>=last:
-                                return False
-                            if j in c:
-                                return i in Ps
-                            elif i in c:
-                                return j in Ps
-                            return False
-                        def to_calc(j,i,t):
-                            if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
-                                return True
-                            if j in c:
-                                return i not in Ps
-                            elif i in c:
-                                return j not in Ps
-                            return False
-                        s_exp = [-Cs[i]**2 
-                                 + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
-                                                               for j in self.variables] 
-                                                              for k in self.variables]
-                                                             for t in self.lags]
-                                                            for v in self.lags])) 
-                                  + (1-r[i]**2)*Bps[i] for i in c]
-                        s_exp += [make_sigma_expression(0,j,i) 
-                                  for i in now_look
-                                  for j in now_look
-                                  if to_include(j,i,0)]
-                        s_exp += [make_sigma_expression(self.tau_max, j, i) 
-                                  for i in now_look 
-                                  for j in now_look
-                                  if to_include(j,i,self.tau_max)]
-                        s_exp += [make_sigma_expression(t,j,i) 
-                                  for i in now_look
-                                  for j in now_look
-                                  for t in self.lags[1:]
-                                  if to_include(j,i,t)]
-                        cxs = np.array([n in now_look for n in self.variables])
-                        rho_loc = list(set(RHOs[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
-                        cxs_small = np.array([n in now_look if self.order(n)<last else False 
-                                              for n in self.variables])
-                        rho_loc += list(set(RHOs[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
-                        rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                                and Matrix(s_exp).has(rho))]
-                        rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                                and not Matrix(s_exp).has(rho))]
-                        now_vars = [Cs[cx] for cx in c] + rho_loc_1
-                        
-                        #solve
-                        check_vars(now_vars, s_exp)
-                        SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
-                        S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
-    
-                        #second update
-                        for i in c:
-                            Cs[i] = Cs[i].subs(S_dict_local)
-                            self[:,i,:] = self[:,i,:]*r[i]/Cs[i]
-                            RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
-                            RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
-                        
-                        #calculate some more!
-                        calc_dict = {}
-                        last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
-                        for j in now_look:
-                            for i in now_look:
-                                for t in self.lags:
-                                    if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
-                                        calc_dict[RHOs[t,j,i]]=r[i]/Cs[i] \
-                                                               *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k]
-                                                                                  for k in now_look]
-                                                                                 for v in self.lags]))
-                        exp_here = [-k + v for k, v in calc_dict.items()]
-                        ks = list(calc_dict.keys())
-                        if len(exp_here)>0:
-                            check_vars(ks, exp_here)
-                            SH = nsolve(exp_here, ks, [0 for i in ks])
-                            calc_dict = {k: SH[i] for i, k in enumerate(ks)}
-                            calc_dicts+=[calc_dict]
-                            for i in c:
-                                RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(calc_dict))
-                                RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(calc_dict))
-
-                    if not check_vars([], Matrix(np.sum(RHOs, axis=2))):
-                        for cd in calc_dicts:
-                            for k, v in cd.items():
-                                print("{}: {}".format(k,v))
-    
+                    RHOs, Bp, Cs, r = self._gen_coefficients_standardized(P, Bp_init, CO)
                 except ValueError:
                     discarded_c +=1
                     continue
-
             else:
-                self *= np.random.uniform(low=.2, high=2, size=self.shape)
-                self *= np.random.choice(a=[-1,1], size=self.shape)
-            
-            #stability check
-            z = Symbol("z")
-            M = Matrix(
-                np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
-                - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
-                         axis=tsGraph.AXIS_LABELS['time'])
-            ).det()
-            S = solve(M)
-            stable = (np.array([Abs(s) for s in S])>1).all()
+                self._gen_coefficients_UVN()
+            stable = self._check_stability()
             if not stable:
                 discarded_u += 1
 
@@ -934,14 +1050,11 @@ class tsGraph(Graph):
         return self.data
 
     #functions with graph logic
-    def order(self, i):
-        '''returns the placement of the variable at index i in the topological order'''
-        return np.where(self.topo_order==i)[0]
-    def summary(self):
+    def get_adjacencies(self):
         r'''Returns an N x N summary-graph adjacency matrix.
         The i,j-th entry represents an effect of X_i on X_j.
         '''
-        return self.any(axis='time').astype(int)
+        return self.any(axis='time')
     
     def summary_order(self):
         r'''Detects cycles in the adjacency matrix self.A. 
@@ -966,9 +1079,9 @@ class tsGraph(Graph):
             id_used = np.array([any([j in c for c in collected_cycles])
                                 for j in idn]).squeeze()
         idc = np.array([c[0] for c in collected_cycles])
-        c_anc = tsGraph._remove_diagonal(tsGraph.select_vars(anc, idc))
-        num_ancestors = np.sum(c_anc, axis=tsGraph.AXIS_LABELS['source'])
-        num_descendents = np.sum(c_anc, axis=tsGraph.AXIS_LABELS['sink'])
+        c_anc = tsGraph._remove_diagonal(self.select_vars(idc, A=anc))
+        num_ancestors = self.sum(matrix=c_anc, axis='source')
+        num_descendents = self.sum(matrix=c_anc, axis='sink')
         cycle_order = np.argsort(num_ancestors)
         summary_order = [self.topo_order[np.sort(np.concatenate([self.order(e)
                                                                  for e in collected_cycles[i]]))]
@@ -979,7 +1092,47 @@ class tsGraph(Graph):
     def _make_table_titles(self):
         return np.array(["Lag {}".format(i) for i in self.lags])
 
-class TimeSeries(object):
+class Data(object):
+    AXIS_LABELS = {'variables': 0, 'observations': 1}
+    analysis_options = ['var', 'R2']
+
+    def __getitem__(self, tpl):
+        return self.data.__getitem__(tpl)
+        
+    def __init__(self, N, O, labels, data):
+        self.N = N
+        self.P = O
+        self.labels = labels
+        self.data = data
+        
+    def var(self):
+        '''Variance of each variable over time'''
+        return np.var(self.data, axis=self.AXIS_LABELS['observations'], keepdims=True)
+
+    def _get_regressors(self):
+        return self.data
+
+    def _remove_regressors(self, X, i):
+        return X[np.arange(self.N) != i, :]
+        
+    def R2(self):
+        r'''R2 predictability as detailed in Reisach, Tami, Seiler, Chambaz, and Weichwald (2023). 
+        "A Scale-Invariant Sorting Criterion to Find a Causal Order in Additive Noise Models." 
+        (In Advances in Neural Information Processing Systems, Vol. 36. 785–807.) modified to fit
+        time series. This provides an upper-bound for predictability from causal parents. 
+
+        Set summary=True for timeseries R2-sortability defined in Lohse and Wahl.
+        '''
+        R2s = np.ones((self.N,1))*np.nan
+        X = self._get_regressors()
+        for i in range(self.N):
+            X_i = self._remove_regressors(X, i)
+            Xi = X[i,:]
+            _, resid, _, _ = np.linalg.lstsq(X_i.T, Xi.T,rcond=None)
+            R2s[i] = 1 - resid[0]/self.P/np.var(Xi)
+        return R2s
+
+class TimeSeries(Data):
     r""" Time Series Data object.
 
     Parameters
@@ -998,19 +1151,29 @@ class TimeSeries(object):
     AXIS_LABELS : dict
         Names of dimensions and their indices
     """
-    AXIS_LABELS = {'variables': 0, 'time': 1}
+    AXIS_LABELS = Data.AXIS_LABELS
+    AXIS_LABELS['time'] = AXIS_LABELS['observations']
+    analysis_options = Data.analysis_options + ['R2_summary']
 
     def __init__(self, N, T, labels, data):
-        self.N = N
-        self.T = T
-        self.labels = labels
-        self.data = data
+        super().__init__(N, T, labels, data)
+
+    def _get_regressors(self):
+        X = self[:,self.tau_max:]
+        for tau in range(1, self.tau_max+1):
+            X = np.append(X, self[:,self.tau_max-tau:-tau], axis=TimeSeries.AXIS_LABELS['variables'])
+        return X
+
+    def _remove_regressors(self, X, i):
+        n_rows = (self.tau_max+1)*self.N
+        idr = np.arange(n_rows)
+        if self.summary:
+            X_i = X[idr%self.N!=i,:]
+        else:
+            X_i = X[idr!=i,:]
+        return X_i
         
-    def var(self):
-        '''Variance of each variable over time'''
-        return np.var(self.data, axis=TimeSeries.AXIS_LABELS['time'], keepdims=True)
-        
-    def R2(self, tau_max, summary=False):
+    def R2(self, tau_max=None, summary=False):
         r'''R2 predictability as detailed in Reisach, Tami, Seiler, Chambaz, and Weichwald (2023). 
         "A Scale-Invariant Sorting Criterion to Find a Causal Order in Additive Noise Models." 
         (In Advances in Neural Information Processing Systems, Vol. 36. 785–807.) modified to fit
@@ -1018,23 +1181,17 @@ class TimeSeries(object):
 
         Set summary=True for timeseries R2-sortability defined in Lohse and Wahl.
         '''
-        R2s = np.ones((self.N,1))*np.nan
-        X = self[:,tau_max:]
-        for tau in range(1, tau_max+1):
-            X = np.append(X, self[:,tau_max-tau:-tau], axis=TimeSeries.AXIS_LABELS['variables'])
-        n_rows = (tau_max+1)*self.N
-        idr = np.arange(n_rows)
-        for i in range(self.N):
-            if summary:
-                X_i = X[idr%self.N!=i,:]
-            else:
-                X_i = X[idr!=i,:]
-            Xi = X[i,:]
-            _, resid, _, _ = np.linalg.lstsq(X_i.T, Xi.T,rcond=None)
-            R2s[i] = 1 - resid[0]/self.T/np.var(Xi)
-        return R2s
-    def __getitem__(self, tpl):
-        return self.data.__getitem__(tpl)
+        if tau_max is not None:
+            self.tau_max = tau_max
+        self.summary = summary
+        R = super().R2()
+        del self.tau_max
+        del self.summary
+        return R
+
+    def R2_summary(self, tau_max=None):
+        return self.R2(tau_max=tau_max, summary=True)
+
     def __repr__(self):
         plt.figure(layout='constrained', figsize=(4,3))
         v = self.var().squeeze()
@@ -1042,7 +1199,7 @@ class TimeSeries(object):
         vo = vo[::-1]
         plt.plot(self.data.T[:,vo])
         plt.legend(list(np.array(self.labels)[vo]))
-        plt.xlim([0,self.T-1])
+        plt.xlim([0,self.P-1])
         plt.xlabel("Time")
         plt.ylabel("Standardized Value")
         return "TimeSeries {}".format(id(self))
