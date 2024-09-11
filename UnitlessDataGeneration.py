@@ -91,6 +91,73 @@ def gen_unitless_iid_SCMs(N=20, O=100, B=5000, **kwargs):
         g.gen_data(O)
     return Gs
 
+def gen_unitless_time_series(T=1000, B=100, time_limit=5, convergence_attempts=2, **init_args):
+    r'''Method for generating data from many random SCMs.
+
+    Parameters
+    _________
+    T : int, optional (Default: 1000)
+        Number of observations in each generated time series
+    B : int, optional (Default: 100)
+        Number of SCMs (and associated data) to generate
+    time_limit : int, optional (Default: 5)
+        Maximum number of seconds to spend on each attempt at generating an SCM
+    N, tau_max, p, p_auto, init_type: parameters for graph initialization
+
+    Returns
+    _______
+    Gs : list of B Graph objects
+    Ds : list of B TimeSeries objects
+    text_trap: printed output from graph and data generation.
+    
+    '''
+    no_converge = 0
+    unstable = 0
+    diverge = 0
+    TO = 0
+
+    Gs = []
+    Ds = []
+
+    text_trap = io.StringIO()
+    while len(Gs)<B:
+        all_errors = no_converge+unstable+diverge+TO
+        _progress_message("{:.0%} completed ({} discarded)".format(
+                                len(Ds)/B, all_errors))
+        try:
+            with _time_lim(time_limit):
+                with redirect_stdout(text_trap):
+                    G = tsGraph(**init_args)
+                    G = G.gen_coefficients(convergence_attempts=convergence_attempts)
+                    D = G.gen_data(T)
+        except ConvergenceError:
+            no_converge += 1
+            continue
+        except UnstableError:
+            unstable += 1
+            continue
+        except GenerationError:
+            diverge += 1
+            continue
+        except TimeoutException:
+            TO += 1
+            continue
+        Gs+=[G]
+        Ds+=[D]
+
+    _clear_progress_message()
+    if all_errors>0:
+        print(("Discarded {} system{}: "
+               "{} that did not converge, "
+               "{} that were analytically unstable, "
+               "{} that computationally diverged, "
+               "and {} that timed out.").format(
+            all_errors, 's' if all_errors>1 else '', 
+            no_converge, unstable, diverge, TO))
+
+    return Gs, Ds, text_trap
+
+#Making analysis plots
 def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 500, B = 500):
     def make_collider_adj(N):
         A = np.zeros((N,N))
@@ -196,73 +263,6 @@ def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000):
     plt.xlabel("Edge Likelihood")
     plt.title("Sortability Distribution Moments")
     #plt.savefig(fname="SortabilityStats", bbox_inches='tight')
-
-def gen_unitless_time_series(N, tau_max, p=None, p_auto=None, T=1000, B=100, 
-                             time_limit=5, init_type='no_feedback'):
-    r'''Method for generating data from many random SCMs.
-
-    Parameters
-    _________
-    T : int, optional (Default: 1000)
-        Number of observations in each generated time series
-    B : int, optional (Default: 100)
-        Number of SCMs (and associated data) to generate
-    time_limit : int, optional (Default: 5)
-        Maximum number of seconds to spend on each attempt at generating an SCM
-    N, tau_max, p, p_auto, init_type: parameters for graph initialization
-
-    Returns
-    _______
-    Gs : list of B Graph objects
-    Ds : list of B TimeSeries objects
-    text_trap: printed output from graph and data generation.
-    
-    '''
-    no_converge = 0
-    unstable = 0
-    diverge = 0
-    TO = 0
-
-    Gs = []
-    Ds = []
-
-    text_trap = io.StringIO()
-    while len(Gs)<B:
-        all_errors = no_converge+unstable+diverge+TO
-        _progress_message("{:.0%} completed ({} discarded)".format(
-                                len(Ds)/B, all_errors))
-        try:
-            with _time_lim(time_limit):
-                with redirect_stdout(text_trap):
-                    G = tsGraph(N, tau_max, init_type=init_type)
-                    G = G.gen_coefficients(convergence_attempts=2)
-                    D = G.gen_data()
-        except ConvergenceError:
-            no_converge += 1
-            continue
-        except UnstableError:
-            unstable += 1
-            continue
-        except GenerationError:
-            diverge += 1
-            continue
-        except TimeoutException:
-            TO += 1
-            continue
-        Gs+=[G]
-        Ds+=[D]
-
-    _clear_progress_message()
-    if all_errors>0:
-        print(("Discarded {} system{}: "
-               "{} that did not converge, "
-               "{} that were analytically unstable, "
-               "{} that computationally diverged, "
-               "and {} that timed out.").format(
-            all_errors, 's' if all_errors>1 else '', 
-            no_converge, unstable, diverge, TO))
-
-    return Gs, Ds, text_trap
 
 class Graph(object):
     r"""Data-generation object, and methods for creating and manipulating them.
