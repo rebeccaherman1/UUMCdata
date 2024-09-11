@@ -1,4 +1,4 @@
-"""Unitless/Unsortable linear time-series SCM and data generation"""
+"""Unitless/Unsortable linear (time-series) SCM and data generation"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
 
@@ -17,12 +17,14 @@ import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
 import re
 
+#Checks, warnings, and errors
 class UnstableError(Exception): pass
 class ConvergenceError(Exception): pass
 class GenerationError(Exception): pass
 class TimeoutException(Exception): pass
+class OptionError(Exception): pass
 @contextmanager
-def time_lim(seconds):
+def _time_lim(seconds):
     def signal_handler(signum, frame):
         raise TimeoutException("Timed out!")
     signal.signal(signal.SIGALRM, signal_handler)
@@ -31,6 +33,98 @@ def time_lim(seconds):
         yield
     finally:
         signal.alarm(0)
+def _check_given(name, value):
+    '''Checks that an optional input is specified'''
+    if value is None:
+        raise OptionError("Please specify {}".format(name))
+def _check_option(name, options, chosen):
+    '''checks that a valid keyword is chosen'''
+    if chosen not in options:
+        raise OptionError("Valid choices for {} include {}".format(name, options))
+def _progress_message(msg):
+    '''Progress update that modifies in place'''
+    sys.stdout.write('\r')
+    sys.stdout.write(msg)
+    sys.stdout.flush()
+def _clear_progress_message():
+    sys.stdout.write('\r')
+def _check_vars(now_vars, s_exp):
+    missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
+    if len(missing_vars)>0:
+        print("MISSING VARIABLES! {}".format(missing_vars))
+    return len(missing_vars)==0
+
+#user-available helper function
+def remove_diagonal(M):
+    '''removes the diagonal from a 2D array M'''
+    return M & ~np.diag(np.diag(M))
+
+def gen_unitless_time_series(N, tau_max, p=None, p_auto=None, T=1000, B=100, 
+                             time_limit=5, init_type='no_feedback'):
+    r'''Method for generating data from many random SCMs.
+
+    Parameters
+    _________
+    T : int, optional (Default: 1000)
+        Number of observations in each generated time series
+    B : int, optional (Default: 100)
+        Number of SCMs (and associated data) to generate
+    time_limit : int, optional (Default: 5)
+        Maximum number of seconds to spend on each attempt at generating an SCM
+    N, tau_max, p, p_auto, init_type: parameters for graph initialization
+
+    Returns
+    _______
+    Gs : list of B Graph objects
+    Ds : list of B TimeSeries objects
+    text_trap: printed output from graph and data generation.
+    
+    '''
+    no_converge = 0
+    unstable = 0
+    diverge = 0
+    TO = 0
+
+    Gs = []
+    Ds = []
+
+    text_trap = io.StringIO()
+    while len(Gs)<B:
+        all_errors = no_converge+unstable+diverge+TO
+        _progress_message("{:.0%} completed ({} discarded)".format(
+                                len(Ds)/B, all_errors))
+        try:
+            with _time_lim(time_limit):
+                with redirect_stdout(text_trap):
+                    G = tsGraph(N, tau_max, init_type=init_type)
+                    G = G.gen_coefficients(convergence_attempts=2)
+                    D = G.gen_data()
+        except ConvergenceError:
+            no_converge += 1
+            continue
+        except UnstableError:
+            unstable += 1
+            continue
+        except GenerationError:
+            diverge += 1
+            continue
+        except TimeoutException:
+            TO += 1
+            continue
+        Gs+=[G]
+        Ds+=[D]
+
+    _clear_progress_message()
+    if all_errors>0:
+        print(("Discarded {} system{}: "
+               "{} that did not converge, "
+               "{} that were analytically unstable, "
+               "{} that computationally diverged, "
+               "and {} that timed out.").format(
+            all_errors, 's' if all_errors>1 else '', 
+            no_converge, unstable, diverge, TO))
+
+    return Gs, Ds, text_trap
 
 class Graph(object):
     r"""Data-generation object, and methods for creating and manipulating them.
@@ -65,7 +159,7 @@ class Graph(object):
         names of the dimensions of the adjacency array and the dimension index.
     graph_types_ : list
         accepted inputs for init_type
-    generation_options : list
+    generation_options_ : list
         accepted options for gen_coefficients
     
     specified : shortcut for initializing graphs from a specified adjacency array
@@ -76,10 +170,10 @@ class Graph(object):
     #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
     graph_types_ = ['random', 'connected', 'disconnected', 'specified']
-    generation_options = ['standardized', 'unit-variance-noise']
+    generation_options_ = ['standardized', 'unit-variance-noise']
 
     def __init__(self, N, init_type='random', p=.5, 
-                 init=None, noise=None, labels=None, topo_order=None):
+                 init=None, noise=None, labels=None):
         #user-specified initializations
         self.N = N
         self.variables = range(self.N)
@@ -90,6 +184,7 @@ class Graph(object):
         else:
             self.labels = ["$X_{}$".format(i) for i in self.variables]
         self._make_shape()
+        _check_option('init_type', self.graph_types_, init_type)
         self.init_type = init_type
         
         #empty initializations for later replacement
@@ -101,7 +196,7 @@ class Graph(object):
 
         #initializion of the adjacency matrix and topological order
         if init_type=='specified':
-            self._make_specified(self, init, topo_order)
+            self._make_specified(init)
         else:
             #Make a fully-connected DAG
             self.A = np.ones(shape=self.shape)
@@ -112,6 +207,12 @@ class Graph(object):
                 self._make_random(p)
             #randomize the order of appearance of the variables
             self.shuffle()
+
+    @classmethod
+    def specified(cls, init, noise=None, labels=None):
+        '''Helper function for initializing a graph from a specified adjacency matrix'''
+        return cls(init.shape[cls.AXIS_LABELS['source']], 
+                   init_type='specified', init=init, labels=labels, noise=noise)
 
     #User-available retrieval functions
     def get_adjacencies(self):
@@ -141,8 +242,16 @@ class Graph(object):
         if A is None:
             A = self.A
         return A[V,:][:,V]
+    def copy(self):
+        '''Creates a new graph equivalent to the input graph G.'''
+        return deepcopy(self)
 
     #user-available modification functions
+    def set_topo_order(self):
+        '''Discovers and sets a topological ordering consistent with the adjacency matrix.'''
+        anc = self.ancestry()
+        num_ancestors = self.sum(matrix=anc, axis='source')
+        self.topo_order = np.argsort(num_ancestors)
     def shuffle(self):
         '''Randomly shuffles the order of the variables.'''
         new_order = np.arange(self.N)
@@ -156,8 +265,11 @@ class Graph(object):
             unit-variance-noise : Draws coefficients from a uniform distribution and sets all
                                   noise variances to 1. typically used, here for comparison.
         '''
-        self._check_option('style', self.generation_options, style)
+        _check_option('style', self.generation_options_, style)
         self.style = style
+        self._reset_adjacency_matrix()
+        self._reset_cov()
+        self._reset_s2()
         if self.style=='standardized':
             self._gen_coefficients_standardized()
         else:
@@ -182,7 +294,7 @@ class Graph(object):
         Causal Discovery Benchmarks May Be Easy To Game" (arXiv:2102.13647). Reisach's 
         definition of sortability has been modified to avoid double-counting the pair-wise 
         sortability of two variables with multiple causal paths between them, and has been 
-        further modified to accept cyclic graphs in the manner described by Christopher 
+        further modified to accept graphs with cycles in the manner described by Christopher 
         Lohse and Jonas Wahl in "Sortability of Time Series Data" (Submitted to the Causal 
         Inference for Time Series Data Workshop at the 40th Conference on Uncertainty in 
         Artificial Intelligence.). 
@@ -192,7 +304,7 @@ class Graph(object):
             'R2' : Predictability from other variables, as in Reisach et al.
         These functions are defined in the Data class.
         '''
-        self._check_option('func', self.data.analysis_options, func)
+        _check_option('func', self.data.analysis_options, func)
         E = self.get_adjacencies()
         anc = self.ancestry()
         Ek = E.copy()
@@ -218,8 +330,80 @@ class Graph(object):
             return 0.5
         else:
             return n_correctly_ordered_paths / n_paths
+    
+    #Initialization Helper Functions
+    def _rand_edges(self, p, size=None):
+        return np.random.choice(a=[1,0], size=size, p=[p, 1-p])
+    def _make_shape(self):
+        self.shape = tuple((self.N, self.N))
+        return
+    def _remove_cycles(self):
+        self *= (np.tril(self.A)==0)
+    def _make_random(self, p):
+        self*=self._rand_edges(p, size=self.shape)
+    def _make_specified(self, init):
+        _check_given('adjacency matrix', init)
+        assert init.shape==self.shape, ("initialization matrix shape {} "
+             "not consistent with expected shape {}").format(init.shape, self.shape)
+        self.A = init
+        self.set_topo_order()
+        return
 
-    #functions acting on the adjacency matrix...
+    #gen_coefficients helper functions
+    def _gen_coefficients_UVN(self, low=.2, high=2):
+        self *= np.random.uniform(low=low, high=high, size=self.shape)
+        self *= np.random.choice(a=[-1,1], size=self.shape)
+    def _gen_coefficients_standardized(self):
+        P = self.get_num_parents()
+        A, r = self._initial_draws(P)
+        self *= A
+        self._rescale_coefficients(r, P)
+    def _reset_adjacency_matrix(self):
+        self.A = self.A != 0
+    def _reset_cov(self):
+        self.cov = np.diag(np.ones((self.N,)))
+    def _reset_s2(self):
+        self.s2 = np.ones((self.N,))  
+    def _initial_draws(self, P):
+        A = np.random.normal(size=self.shape) #coefficient draws -- a'
+        r = np.random.uniform(size=(self.N,)) #starting draws -- r
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r=r**(1/P)
+        return A, r
+    def _re_sort(self, matrix=None):
+        if matrix is None:
+            matrix=self.A
+        return self.select_vars(np.argsort(self.topo_order), A=matrix)
+    def _rescale_coefficients(self, r, P):
+        #Need to go through by topological order!
+        ind_length = (self**2).sum(axis='source') #constant when parents are independent
+        loc_cov = self.select_vars(self.topo_order, A=self.cov)
+        A_loc = self.select_vars(self.topo_order)
+        for it, i in enumerate(self.topo_order):
+            if P[i]==0:
+                continue
+            Ap = A_loc[:it,[it]]
+            r_i = r[i]
+            norm = ind_length[i]
+            R_i = loc_cov[:it,:it]
+            Ci = ((r_i**2*np.matmul(np.matmul(Ap.T, R_i), Ap) + (1-r_i**2)*norm)**.5)[0,0]
+            A_loc[:,it] *= r_i/Ci
+            self.s2[i] = ((1-r_i**2)*norm)**.5/Ci
+            loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
+            loc_cov[it,:] = loc_cov[:,it]
+        self.cov = self._re_sort(loc_cov)
+        self.A = self._re_sort(A_loc)
+
+    #Display helper functions for overwriting
+    def _get_num_cols(self):
+        return 1
+    def _make_table_titles(self):
+        return np.array(["Coefficient"])
+    def _get_coefficients(self, i, j):
+        return [self[i,j]]
+
+    #Magic Functions
     #returning a matrix or element
     def __getitem__(self, tpl):
         return self.A.__getitem__(tpl)
@@ -299,131 +483,10 @@ class Graph(object):
         return self._i_pass_on(lambda x,y : x/y, other)
     def __ipow__(self, other):
         return self._i_pass_on(lambda x,y : x**y, other)
-    
-    #Initialization Helper Functions
-    def _rand_edges(self, p, size=None):
-        return np.random.choice(a=[1,0], size=size, p=[p, 1-p])
-    @classmethod
-    def _check_given(cls, name, value):
-        '''Checks that an optional input is specified'''
-        if value is None:
-            raise ValueError("Please specify {}".format(name))
-    
-    #...for overriding in children classes
-    def _make_shape(self):
-        self.shape = tuple((self.N, self.N))
-        return
-    def _remove_cycles(self):
-        self *= (np.tril(self.A)==0)
-    def _make_random(self, p):
-        self*=self._rand_edges(p, size=self.shape)
-    def _make_specified(self, init, topo_order):
-        self._check_given('adjacency matrix', init)
-        self._check_given('topological order', topo_order)
-        assert init.shape==self.shape, ("initialization matrix shape {} "
-             "not consistent with expected shape {}").format(init.shape, self.shape)
-        self.A = init
-        self.topo_order = topo_order
-        #Note: I am not checking fot incorrect topological orders
-        return
-
-
-    #Not used!
-    @classmethod
-    def _remove_diagonal(cls, M):
-        '''removes the diagonal from a 2D array M'''
-        return M & ~np.diag(np.diag(M))
-    #used later
-    @classmethod
-    def _check_option(cls, name, options, chosen):
-        '''checks that a valid keyword is chosen'''
-        if chosen not in options:
-            raise ValueError("Valid choices for {} include {}".format(name, options))
-    @classmethod
-    def _progress_message(cls, msg):
-        '''Progress update that modifies in place'''
-        sys.stdout.write('\r')
-        sys.stdout.write(msg)
-        sys.stdout.flush()
-
-    #gen_coefficients helper functions
-    def _gen_coefficients_UVN(self):
-        raise ValueError("NOT YET IMPLEMENTED")
-    def _gen_coefficients_standardized(self):
-        self._reset_adjacency_matrix()
-        self._reset_cov()
-        self._reset_s2()
-        P = self.get_num_parents()
-        A, r = self._initial_draws(P)
-        self *= A
-        self._rescale_coefficients(r, P)
-    def _reset_adjacency_matrix(self):
-        self.A = self.A != 0
-    def _reset_cov(self):
-        self.cov = np.diag(np.ones((self.N,)))
-    def _reset_s2(self):
-        self.s2 = np.ones((self.N,))  
-    def _initial_draws(self, P):
-        A = np.random.normal(size=self.shape) #coefficient draws -- a'
-        r = np.random.uniform(size=(self.N,)) #starting draws -- r
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            r=r**(1/P)
-        return A, r
-    def _re_sort(self, matrix=None):
-        if matrix is None:
-            matrix=self.A
-        return self.select_vars(np.argsort(self.topo_order), A=matrix)
-    def _rescale_coefficients(self, r, P):
-        #Need to go through by topological order!
-        ind_length = (self**2).sum(axis='source') #constant when parents are independent
-        loc_cov = self.select_vars(self.topo_order, A=self.cov)
-        A_loc = self.select_vars(self.topo_order)
-        for it, i in enumerate(self.topo_order):
-            if P[i]==0:
-                continue
-            Ap = A_loc[:it,[it]]
-            r_i = r[i]
-            norm = ind_length[i]
-            R_i = loc_cov[:it,:it]
-            Ci = ((r_i**2*np.matmul(np.matmul(Ap.T, R_i), Ap) + (1-r_i**2)*norm)**.5)[0,0]
-            A_loc[:,it] *= r_i/Ci
-            self.s2[i] = ((1-r_i**2)*norm)**.5/Ci
-            loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
-            loc_cov[it,:] = loc_cov[:,it]
-        self.cov = self._re_sort(loc_cov)
-        self.A = self._re_sort(A_loc)
 
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
-        S = self.get_adjacencies()
-        summary_edges = np.sum(S)
-        DAG_width = 3
-        N_CUTOFF = 8
-        if self.N > N_CUTOFF:
-            DAG_width *= self.N/N_CUTOFF
-        MAX_ROWS = int(np.floor(5*DAG_width))
-        Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
-        Table_width = .75*self._get_num_cols()+.5
-        if summary_edges > 0:
-            num_tables = int(np.ceil(Table_height/DAG_width))
-            w_space_frac = .05
-            ROWS_PER_TABLE = int(np.ceil(summary_edges/num_tables))
-        else:
-            num_tables = 0
-            w_space_frac = 0
-        fig_width = (DAG_width+(Table_width)*num_tables)/(1-w_space_frac)
-        
-        ax = plt.figure(figsize=(fig_width,DAG_width*(1-w_space_frac)), 
-                        layout="constrained").subplots(1,num_tables+1,
-                                                       width_ratios=[DAG_width]+[Table_width]*num_tables,
-                                                       gridspec_kw = {'wspace':w_space_frac})
-        if num_tables==0:
-            first_ax = ax
-        else:
-            first_ax = ax[0]
-        artists = []
-        first_ax.axis("off")
+        #helper function definitions
         def label_len(label):
             digits_ = 0
             valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
@@ -444,15 +507,63 @@ class Graph(object):
             ri = np.zeros((num_rows,)).astype(object)
             r = 0
             return rep, ri, r
-        for i, label in enumerate(self.labels):
+        def make_fig(N_CUTOFF, DAG_width, summary_edges):
+            if self.N > N_CUTOFF:
+                DAG_width *= self.N/N_CUTOFF
+            MAX_ROWS = int(np.floor(5*DAG_width))
+            Table_height = DAG_width/(MAX_ROWS+1)*(summary_edges+1)
+            Table_width = .75*self._get_num_cols()+.5
+            if summary_edges > 0:
+                num_tables = int(np.ceil(Table_height/DAG_width))
+                w_space_frac = .05
+                ROWS_PER_TABLE = int(np.ceil(summary_edges/num_tables))
+            else:
+                num_tables = 0
+                w_space_frac = 0
+                ROWS_PER_TABLE = 0
+            fig_width = (DAG_width+(Table_width)*num_tables)/(1-w_space_frac)
+            fig_height = DAG_width*(1-w_space_frac)
+            ax = plt.figure(figsize=(fig_width,fig_height), 
+                            layout="constrained").subplots(1,num_tables+1,
+                                                           width_ratios=[DAG_width]+[Table_width]*num_tables,
+                                                           gridspec_kw = {'wspace':w_space_frac})
+            return ax, num_tables, ROWS_PER_TABLE
+        def add_variable(i, label, ax):
             angle = 2*np.pi/self.N*i
             radius = .35
             artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.525),
                                       .025*label_len(label)+.05, .1, ec="none")
             artist.set(color="black")
-            first_ax.add_artist(artist)
-            first_ax.annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
-            artists +=[artist]
+            ax.add_artist(artist)
+            ax.annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
+            return artist
+        def add_edge(i, j, artists, ax):
+            posA=artists[i].center
+            posB=artists[j].center
+            if i<j:
+                connectionstyle="arc3,rad=.5"
+            elif i==j:
+                connectionstyle="arc3,rad=2"
+                posA = artists[i].get_corners()[0]
+                posB = artists[i].get_corners()[1]
+            else:
+                connectionstyle="arc3"
+            arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
+                                             arrowstyle='->', mutation_scale=15, color='k', 
+                                             connectionstyle=connectionstyle)
+            ax.add_artist(arrow)
+
+            
+        S = self.get_adjacencies()
+        summary_edges = np.sum(S)
+        DAG_width = 3
+        N_CUTOFF = 8
+        ax, num_tables, ROWS_PER_TABLE = make_fig(N_CUTOFF, DAG_width, summary_edges)
+        first_ax = ax if num_tables==0 else ax[0]
+        first_ax.axis("off")
+        artists = []
+        for i, label in enumerate(self.labels):
+            artists +=[add_variable(i, label, first_ax)]
         if summary_edges > 0: #necessary because of weirdness in matplotlib.table -- can't make an empty table
             h = self._make_table_titles()
             table_id = 0
@@ -460,20 +571,7 @@ class Graph(object):
             for i in self.variables:
                 for j in self.variables:
                     if S[i,j]!=0:
-                        posA=artists[i].center
-                        posB=artists[j].center
-                        if i<j:
-                            connectionstyle="arc3,rad=.5"
-                        elif i==j:
-                            connectionstyle="arc3,rad=2"
-                            posA = artists[i].get_corners()[0]
-                            posB = artists[i].get_corners()[1]
-                        else:
-                            connectionstyle="arc3"
-                        arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
-                                                         arrowstyle='->', mutation_scale=15, color='k', 
-                                                         connectionstyle=connectionstyle)
-                        ax[0].add_artist(arrow)
+                        add_edge(i, j, artists, first_ax)
                         ri[r] = "{}-->{}".format(i,j)
                         rep[r,:]=np.array([str(round(a,3)) for a in self._get_coefficients(i, j)])
                         if self.order(j)<=self.order(i):
@@ -486,14 +584,6 @@ class Graph(object):
             plot_table(table_id, rep, ri, h)
                             
         return "Graph {}".format(id(self))
-
-    #Display helper functions for overwriting
-    def _get_num_cols(self):
-        return 1
-    def _make_table_titles(self):
-        return np.array(["Coefficient"])
-    def _get_coefficients(self, i, j):
-        return [self[i,j]]
 
 class tsGraph(Graph):
     r"""Data-generation object, and methods for creating and manipulating them.
@@ -548,7 +638,7 @@ class tsGraph(Graph):
     
     def __init__(self, N, tau_max, 
                  init_type='random', p=.5, p_auto=.8, #TODO change p_auto default to None?
-                 init=None, noise=None, labels=None, topo_order=None):
+                 init=None, noise=None, labels=None):
         """
         Optional Parameters
         ___________________
@@ -582,317 +672,63 @@ class tsGraph(Graph):
         self.lags = range(self.tau_max+1)
         self.p_auto = p_auto
         super().__init__(N, init_type, p, 
-                 init, noise, labels, topo_order)
-        #lists feedback loops by summary-graph topological order.
+                 init, noise, labels)
+        #lists feedback loops by summary-graph topological order as "components"
         #Additionally updates topo_order to match this where possible.
-        self.components = self.summary_order()
+        self.set_topo_order()
 
-    def sortability(self, func='var', tol=1e-9):
-        r'''
-        Function options include:
-            'var' : variance over time, as in Lohse and Wahl; analogous to Reisach et al.
-            'R2_summary' : Predictability from (the past and present of) distinct processes,
-                           as in Lohse and Wahl.
-            'R2' : Predictability from distinct processes and the process's own past.
-                   Introduced here; analogous to Reisach et al.
-        These functions are defined in the TimeSeries class.
-        '''
-        self.data.tau_max = self.tau_max
-        R = super().sortability(func=func, tol=tol)
-        return R
-
-    def _get_coefficients(self, i, j):
-        return self[i,j]
-
-    def _get_num_lags(self):
-        return len(self.lags)
-
-    def _get_num_cols(self):
-        return self._get_num_lags()
-
-    def _make_shape(self):
-        self.shape = tuple((self.N, self.N, self._get_num_lags()))
-        return
-
-    def _remove_cycles(self):
-        self[:,:,0] *= (np.tril(self[:,:,0])==0)
-
-    def _make_random(self, p):
-        #helper function definitions
-        def adjust_p(p, tm):
-            return 1 - (1-p)**(1/tm)
-
-        if self.p_auto is None:
-            self.p_auto=p
-        super()._make_random(adjust_p(p, self.tau_max+1))
-        self.p_auto = adjust_p(self.p_auto, self.tau_max)
-        #set auto-dependencies using p_auto
-        for t in self.lags[1:]:
-            for i in self.variables:
-                self[i,i,t] = self._rand_edges(self.p_auto)
-        if self.init_type=='no_feedback':
-            #removed lagged edges in reverse-topological order
-            self.i_triu()
-
-    def __eq__(self, G):
-        return (
-            isinstance(G, tsGraph) 
-            and super().__eq__(self, G)
-            and self.tau_max==G.tau_max 
-        )
-
-    #Public class methods
     @classmethod
-    def specified(cls, init, topo_order, noise=None, labels=None):
+    def specified(cls, init, noise=None, labels=None):
         '''Helper function for initializing a graph from a specified adjacency matrix'''
-        return cls(init.shape[tsGraph.AXIS_LABELS['source']], init.shape[tsGraph.AXIS_LABELS['time']]-1, 
-                   init_type='specified', init=init, topo_order=topo_order,
-                   labels=labels,noise=noise)
-    @classmethod
-    def copy(cls, G):
-        '''Creates a new graph equivalent to the input graph G.'''
-        return deepcopy(G)
+        return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
+                   init_type='specified', init=init, labels=labels, noise=noise)
 
-    @classmethod
-    def gen_unitless_time_series(cls, N, tau_max, p=None, p_auto=None, T=1000, B=100, 
-                                 time_limit=5, init_type='no_feedback'):
-        r'''Method for generating data from many random SCMs.
-
-        Parameters
-        _________
-        T : int, optional (Default: 1000)
-            Number of observations in each generated time series
-        B : int, optional (Default: 100)
-            Number of SCMs (and associated data) to generate
-        time_limit : int, optional (Default: 5)
-            Maximum number of seconds to spend on each attempt at generating an SCM
-        N, tau_max, p, p_auto, init_type: parameters for graph initialization
-
-        Returns
-        _______
-        Gs : list of B Graph objects
-        Ds : list of B TimeSeries objects
-        text_trap: printed output from graph and data generation.
-        
+    #User-available retrieval functions
+    #order, get_num_parents, ancestry, select_vars
+    def get_num_lags(self):
+        return len(self.lags)
+    def get_adjacencies(self):
+        r'''Returns an N x N summary-graph adjacency matrix.
+        The i,j-th entry represents an effect of X_i on X_j.
         '''
-        no_converge = 0
-        unstable = 0
-        diverge = 0
-        TO = 0
-    
-        Gs = []
-        Ds = []
-
-        text_trap = io.StringIO()
-        while len(Gs)<B:
-            all_errors = no_converge+unstable+diverge+TO
-            tsGraph._progress_message("{:.0%} completed ({} discarded)".format(
-                                    len(Ds)/B, all_errors))
-            try:
-                with time_lim(time_limit):
-                    with redirect_stdout(text_trap):
-                        G = tsGraph(N, tau_max, init_type=init_type)
-                        G = G.gen_coefficients(convergence_attempts=2)
-                        D = G.gen_data()
-            except ConvergenceError:
-                no_converge += 1
+        return self.any(axis='time')
+    def cycle_ancestry(self):
+        anc = self.ancestry()
+        cycles = np.triu(remove_diagonal(anc*anc.T))
+        collected_cycles = []
+        idn = np.arange(self.N)
+        id_used = idn.astype(bool)*False
+        for i in idn:
+            if id_used[i]:
                 continue
-            except UnstableError:
-                unstable += 1
-                continue
-            except GenerationError:
-                diverge += 1
-                continue
-            except TimeoutException:
-                TO += 1
-                continue
-            Gs+=[G]
-            Ds+=[D]
-    
-        sys.stdout.write('\r')
-        if all_errors>0:
-            print(("Discarded {} system{}: "
-                   "{} that did not converge, "
-                   "{} that were analytically unstable, "
-                   "{} that computationally diverged, "
-                   "and {} that timed out.").format(
-                all_errors, 's' if all_errors>1 else '', 
-                no_converge, unstable, diverge, TO))
-    
-        return Gs, Ds, text_trap
+            c1 = np.insert(idn[cycles[i,:]],0,i)
+            collected_cycles+=[c1]
+            id_used = np.array([any([j in c for c in collected_cycles])
+                                for j in idn]).squeeze()
+        idc = np.array([c[0] for c in collected_cycles])
+        c_anc = remove_diagonal(self.select_vars(idc, A=anc))
+        return collected_cycles, c_anc
 
-    #Private class methods
-    @classmethod
-    def _sim_graph(cls, G, A):
-        r'''Creates a new graph 
-        with the same number of variables and topological order as the input graph G, 
-        but with a modified agencency matrix A.'''
-        return cls(G.N, A.shape[-1]-1, labels=G.labels, 
-                   init_type='specified', init = A, topo_order=G.topo_order)
-
-    def _gen_coefficients_standardized(self, P, Bp_init, CO):
-        #initial draws
-        self*=np.random.normal(size=self.shape)
-        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            r = np.random.uniform(size=(self.N,))**(1/P)
-
-        #first update
-        B = self.sum(axis='time')
-        for i in self.variables:
-            for j in self.variables:
-                if B[i,j]!=0:
-                    self[i,j]*=Bp[i,j]/B[i,j]
-
-        #construct symbols
-        Cs = symbols(["C"+str(i) for i in self.variables])
-        RHOs = (np.ones((2*self.tau_max+1, self.N, self.N))*np.nan).astype(object)
-        for i in self.variables:
-            RHOs[0,i,i] = 1
-        for i in range(self.N-1):
-            for j in range(i+1,self.N):
-                [i_t, j_t] = self.topo_order[[i,j]]
-                RHOs[0,i_t, j_t] = self._R_symbol(i_t,j_t,0)
-                RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
-        RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
-                                                  for j in self.variables] 
-                                                 for t in self.lags[1:]])
-        RHOs[self.tau_max,:,self.topo_order[-1]]=0
-        for t in range(-self.tau_max, 0):
-            RHOs[t,:,:] = RHOs[-t,:,:].T
-
-        Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
-        Bps[Bps==0]=1
-                    
-        for idc, c in enumerate(CO):
-            calc_dicts = []
-            #construct system of equations
-            anc = self.ancestry()
-            Ps = np.arange(self.N)[self.any(matrix=anc[:,c], axis='sink')]
-            def make_sigma_expression(t,j,i):
-                return (-RHOs[t,j,i] 
-                        + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k] 
-                                                       for k in self.variables] 
-                                                      for v in self.lags])))
-            last = np.max(np.array([self.order(i) for i in list(c)]))
-            so_far = CO[:idc] #+1
-            if len(so_far)>0:
-                so_far = np.concatenate(so_far) #+1
-                now_look =np.concatenate([so_far,c])
-            else:
-                now_look = c
-            def to_include(j,i,t):
-                if t==0 and self.order(i)<=self.order(j):
-                    return False
-                if t==self.tau_max and self.order(i)>=last:
-                    return False
-                if j in c:
-                    return i in Ps
-                elif i in c:
-                    return j in Ps
-                return False
-            def to_calc(j,i,t):
-                if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
-                    return True
-                if j in c:
-                    return i not in Ps
-                elif i in c:
-                    return j not in Ps
-                return False
-            s_exp = [-Cs[i]**2 
-                     + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*RHOs[t-v,j,k]
-                                                   for j in self.variables] 
-                                                  for k in self.variables]
-                                                 for t in self.lags]
-                                                for v in self.lags])) 
-                      + (1-r[i]**2)*Bps[i] for i in c]
-            s_exp += [make_sigma_expression(0,j,i) 
-                      for i in now_look
-                      for j in now_look
-                      if to_include(j,i,0)]
-            s_exp += [make_sigma_expression(self.tau_max, j, i) 
-                      for i in now_look 
-                      for j in now_look
-                      if to_include(j,i,self.tau_max)]
-            s_exp += [make_sigma_expression(t,j,i) 
-                      for i in now_look
-                      for j in now_look
-                      for t in self.lags[1:]
-                      if to_include(j,i,t)]
-            cxs = np.array([n in now_look for n in self.variables])
-            rho_loc = list(set(RHOs[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
-            cxs_small = np.array([n in now_look if self.order(n)<last else False 
-                                  for n in self.variables])
-            rho_loc += list(set(RHOs[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
-            rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                    and Matrix(s_exp).has(rho))]
-            rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
-                                                    and not Matrix(s_exp).has(rho))]
-            now_vars = [Cs[cx] for cx in c] + rho_loc_1
-            
-            #solve
-            self._check_vars(now_vars, s_exp)
-            SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
-            S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
-
-            #second update
-            for i in c:
-                Cs[i] = Cs[i].subs(S_dict_local)
-                self[:,i] = self[:,i]*r[i]/Cs[i]
-                RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(S_dict_local))
-                RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(S_dict_local))
-            
-            #calculate some more!
-            calc_dict = {}
-            last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
-            for j in now_look:
-                for i in now_look:
-                    for t in self.lags:
-                        if to_calc(j,i,t) and isinstance(RHOs[t,j,i], type(Symbol('test'))):
-                            calc_dict[RHOs[t,j,i]]=r[i]/Cs[i] \
-                                                   *np.sum(np.array([[self[k,i,v]*RHOs[t-v,j,k]
-                                                                      for k in now_look]
-                                                                     for v in self.lags]))
-            exp_here = [-k + v for k, v in calc_dict.items()]
-            ks = list(calc_dict.keys())
-            if len(exp_here)>0:
-                self._check_vars(ks, exp_here)
-                SH = nsolve(exp_here, ks, [0 for i in ks])
-                calc_dict = {k: SH[i] for i, k in enumerate(ks)}
-                calc_dicts+=[calc_dict]
-                for i in c:
-                    RHOs[:,i,:] = np.array(Matrix(RHOs[:,i,:]).subs(calc_dict))
-                    RHOs[:,:,i] = np.array(Matrix(RHOs[:,:,i]).subs(calc_dict))
-
-        if not self._check_vars([], Matrix(np.sum(RHOs, axis=2))):
-            for cd in calc_dicts:
-                for k, v in cd.items():
-                    print("{}: {}".format(k,v))
-
-        return RHOs, Bp, Cs, r
-
-    def _gen_coefficients_UVN(self, low=.2, high=2):
-        self *= np.random.uniform(low=low, high=high, size=self.shape)
-        self *= np.random.choice(a=[-1,1], size=self.shape)
-
-    def _check_stability(self):
-        z = Symbol("z")
-        M = Matrix(
-            np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
-            - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
-                     axis=tsGraph.AXIS_LABELS['time'])
-        ).det()
-        S = solve(M)
-        return (np.array([Abs(s) for s in S])>1).all()
-
-    def _R_symbol(self, i,j,l):
-        return Symbol("R{}.{}({})".format(i,j,l))
-    def _check_vars(self, now_vars, s_exp):
-        missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
-        if len(missing_vars)>0:
-            print("MISSING VARIABLES! {}".format(missing_vars))
-        return len(missing_vars)==0
+    #user-available modification functions
+    #shuffle    
+    def set_topo_order(self):
+        r'''Detects cycles in the adjacency matrix self.A. 
+        Two variables X_i and X_j are in a cycle if X_i is an ancestor of X_j and
+        X_j is also an ancestor of X_i. Returns a list of arrays, where each array
+        is a cycle in the summary graph, with component variables listed according
+        to the time-series DAG topological order. The cycles are ordered according
+        to the summary-graph topological ordering between them. The time-seires DAG
+        topological order is updated to an equally-valid alternative that reflects
+        the summary-graph ordering.
+        '''
+        collected_cycles, c_anc = self.cycle_ancestry()
+        num_ancestors = self.sum(matrix=c_anc, axis='source')
+        cycle_order = np.argsort(num_ancestors)
+        summary_order = [self.topo_order[np.sort(np.concatenate([self.order(e)
+                                                                 for e in collected_cycles[i]]))]
+                         for i in cycle_order]
+        self.topo_order = np.concatenate(summary_order)
+        self.components = summary_order
 
     def gen_coefficients(self, style='standardized', convergence_attempts=10):
         r'''Generate a random SCM from a causal graph.
@@ -925,64 +761,23 @@ class tsGraph(Graph):
         convergence_attempts times to find a stable solution.
         
         '''
-        self._check_option('style', self.generation_options, style)
-        self.style = style
-        CO = self.components
-        Bp_init = self.get_adjacencies().astype(float)
-        P = self.get_num_parents()
-        
         stable = False
         discarded_u = 0
         discarded_c = 0
 
-        A_init = (self.A != 0).astype(float)
         while not stable:
-            self.A = A_init.copy()
-            if (discarded_c >= convergence_attempts 
-                or discarded_u >= convergence_attempts):
-                if discarded_u>discarded_c:
-                    raise UnstableError(("No stable solution found for above graph {}; "
-                                         "tried {}x").format(id(self), discarded_u))
-                raise ConvergenceError(("No solution found for above graph {}; "
-                                        "tried {}x").format(id(self), discarded_c))
-
-            tsGraph._progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
-                                                           convergence_attempts))
-
-            if self.style=='standardized':
-                try:
-                    RHOs, Bp, Cs, r = self._gen_coefficients_standardized(P, Bp_init, CO)
-                except ValueError:
-                    discarded_c +=1
-                    continue
-            else:
-                self._gen_coefficients_UVN()
+            self._gen_coefficients_cutoffs(discarded_c, discarded_u, convergence_attempts)
+            try:
+                super().gen_coefficients(style)
+            except ValueError:
+                discarded_c +=1
+                continue
             stable = self._check_stability()
             if not stable:
                 discarded_u += 1
 
-        if style=='standardized':
-            self.cov = RHOs
-            s2 = np.array([(1-r[i]**2)/Cs[i]**2*np.sum(Bp[:,i]**2) for i in self.variables])
-            s2[s2==0]=1
-        else:
-            s2 = np.array([1 for i in self.variables])
-        self.s2 = s2
-
-        sys.stdout.write('\r')
-        if discarded_u + discarded_c > 0:
-            if discarded_u == 0:
-                print("discarded {} solution{} that did not converge".format(
-                    discarded_c, 's' if discarded_c>1 else ''))
-            elif discarded_c == 0:
-                print("discarded {} unstable solution{}".format(
-                    discarded_u, 's' if discarded_u>1 else ''))
-            else:
-                print("discarded {} solutions: {} unstable and {} that did not converge".format(
-                    discarded_u+discarded_c, discarded_u, discarded_c))
-        else:
-            print('                             ')
-
+        _clear_progress_message()
+        self._summarize_discarded_solutions(discarded_c, discarded_u)
         return self
         
     def gen_data(self, T=1000):
@@ -995,9 +790,9 @@ class tsGraph(Graph):
         generation, or more than 1000 for 'unit-variance-noise' generation), this
         raises a GenerationError.
         '''
-        U = np.random.normal(size=(self.N, T+self._get_num_lags()))
+        U = np.random.normal(size=(self.N, T+self.get_num_lags()))
         X = np.zeros(U.shape)
-        prelim_steps = self.N*self._get_num_lags()-1
+        prelim_steps = self.N*self.get_num_lags()-1
         RHOp = np.zeros((prelim_steps,prelim_steps))
         def get_loc(idx):
             return self.topo_order[idx%self.N],idx//self.N
@@ -1038,7 +833,7 @@ class tsGraph(Graph):
                       + np.sum(np.array([[self[j,i,v]*X[j,t-v]
                                           for v in self.lags]
                                          for j in self.variables])))
-        TS = TimeSeries(self.N, T, self.labels, X[:,self._get_num_lags():])
+        TS = TimeSeries(self.N, T, self.labels, X[:,self.get_num_lags():])
         V = TS.var()
         if self.style=='standardized':
             cutoff=2
@@ -1049,48 +844,252 @@ class tsGraph(Graph):
         self.data = TS
         return self.data
 
-    #functions with graph logic
-    def get_adjacencies(self):
-        r'''Returns an N x N summary-graph adjacency matrix.
-        The i,j-th entry represents an effect of X_i on X_j.
+    #user-available analysis functions
+    def sortability(self, func='var', tol=1e-9):
+        r'''
+        Function options include:
+            'var' : variance over time, as in Lohse and Wahl; analogous to Reisach et al.
+            'R2_summary' : Predictability from (the past and present of) distinct processes,
+                           as in Lohse and Wahl.
+            'R2' : Predictability from distinct processes and the process's own past.
+                   Introduced here; analogous to Reisach et al.
+        These functions are defined in the TimeSeries class.
         '''
-        return self.any(axis='time')
-    
-    def summary_order(self):
-        r'''Detects cycles in the adjacency matrix self.A. 
-        Two variables X_i and X_j are in a cycle if X_i is an ancestor of X_j and
-        X_j is also an ancestor of X_i. Returns a list of arrays, where each array
-        is a cycle in the summary graph, with component variables listed according
-        to the time-series DAG topological order. The cycles are ordered according
-        to the summary-graph topological ordering between them. The time-seires DAG
-        topological order is updated to an equally-valid alternative that reflects
-        the summary-graph ordering.
-        '''
-        idn = np.arange(self.N)
-        anc = self.ancestry()
-        cycles = np.triu(tsGraph._remove_diagonal(anc*anc.T))
-        collected_cycles = []
-        id_used = idn.astype(bool)*False
-        for i in idn:
-            if id_used[i]:
-                continue
-            c1 = np.insert(idn[cycles[i,:]],0,i)
-            collected_cycles+=[c1]
-            id_used = np.array([any([j in c for c in collected_cycles])
-                                for j in idn]).squeeze()
-        idc = np.array([c[0] for c in collected_cycles])
-        c_anc = tsGraph._remove_diagonal(self.select_vars(idc, A=anc))
-        num_ancestors = self.sum(matrix=c_anc, axis='source')
-        num_descendents = self.sum(matrix=c_anc, axis='sink')
-        cycle_order = np.argsort(num_ancestors)
-        summary_order = [self.topo_order[np.sort(np.concatenate([self.order(e)
-                                                                 for e in collected_cycles[i]]))]
-                         for i in cycle_order]
-        self.topo_order = np.concatenate(summary_order)
-        return summary_order
+        self.data.tau_max = self.tau_max
+        R = super().sortability(func=func, tol=tol)
+        return R
 
+    #Initialization Helper Functions
+    #_rand_edges, _make_specified
+    def _make_shape(self):
+        self.shape = tuple((self.N, self.N, self.get_num_lags()))
+        return
+    def _remove_cycles(self):
+        self[:,:,0] *= (np.tril(self[:,:,0])==0)
+    def _make_random(self, p):
+        #helper function definitions
+        def adjust_p(p, tm):
+            return 1 - (1-p)**(1/tm)
+
+        if self.p_auto is None:
+            self.p_auto=p
+        super()._make_random(adjust_p(p, self.tau_max+1))
+        self.p_auto = adjust_p(self.p_auto, self.tau_max)
+        #set auto-dependencies using p_auto
+        for t in self.lags[1:]:
+            for i in self.variables:
+                self[i,i,t] = self._rand_edges(self.p_auto)
+        if self.init_type=='no_feedback':
+            #removed lagged edges in reverse-topological order
+            self.i_triu()
+
+    #gen_coefficients helper functions
+    #_reset_adjaceny_matrix, _reset_s2, _re_sort
+    def _reset_cov(self):
+        if self.style=='standardized':
+            RHOs = (np.ones((2*self.tau_max+1, self.N, self.N))*np.nan).astype(object)
+            for i in self.variables:
+                RHOs[0,i,i] = 1
+            for i in range(self.N-1):
+                for j in range(i+1,self.N):
+                    [i_t, j_t] = self.topo_order[[i,j]]
+                    RHOs[0,i_t, j_t] = self._R_symbol(i_t,j_t,0)
+                    RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
+            RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
+                                                      for j in self.variables] 
+                                                     for t in self.lags[1:]])
+            RHOs[self.tau_max,:,self.topo_order[-1]]=0
+            for t in range(-self.tau_max, 0):
+                RHOs[t,:,:] = RHOs[-t,:,:].T
+            self.cov = RHOs
+        else:
+            self.cov = None
+    def _initial_draws(self, P):
+        A, r = super()._initial_draws(P)
+        Bp_init = self.get_adjacencies().astype(float)
+        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
+        B = self.sum(axis='time')
+        for i in self.variables:
+            for j in self.variables:
+                if B[i,j]!=0:
+                    A[i,j]*=Bp[i,j]/B[i,j]
+        return A, r
+        
+        A = np.random.normal(size=self.shape) #coefficient draws -- a'
+        r = np.random.uniform(size=(self.N,)) #starting draws -- r
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            r=r**(1/P)
+        return A, r
+    def _rescale_coefficients(self, r, P):
+        #construct symbols
+        Cs = symbols(["C"+str(i) for i in self.variables])
+        def make_sigma_expression(t,j,i):
+            return (-self.cov[t,j,i] 
+                    + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*self.cov[t-v,j,k] 
+                                                   for k in self.variables] 
+                                                  for v in self.lags])))
+
+        Bp = self.sum(axis='time')
+        Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
+        Bps[Bps==0]=1
+                    
+        for idc, c in enumerate(self.components):
+            calc_dicts = []
+            #construct system of equations
+            anc = self.ancestry()
+            Ps = np.arange(self.N)[self.any(matrix=anc[:,c], axis='sink')]
+            last = np.max(np.array([self.order(i) for i in list(c)]))
+            so_far = self.components[:idc] #+1
+            if len(so_far)>0:
+                so_far = np.concatenate(so_far) #+1
+                now_look =np.concatenate([so_far,c])
+            else:
+                now_look = c
+            def to_include(j,i,t):
+                if t==0 and self.order(i)<=self.order(j):
+                    return False
+                if t==self.tau_max and self.order(i)>=last:
+                    return False
+                if j in c:
+                    return i in Ps
+                elif i in c:
+                    return j in Ps
+                return False
+            def to_calc(j,i,t):
+                if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
+                    return True
+                if j in c:
+                    return i not in Ps
+                elif i in c:
+                    return j not in Ps
+                return False
+            s_exp = [-Cs[i]**2 
+                     + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*self.cov[t-v,j,k]
+                                                   for j in self.variables] 
+                                                  for k in self.variables]
+                                                 for t in self.lags]
+                                                for v in self.lags])) 
+                      + (1-r[i]**2)*Bps[i] for i in c]
+            s_exp += [make_sigma_expression(0,j,i) 
+                      for i in now_look
+                      for j in now_look
+                      if to_include(j,i,0)]
+            s_exp += [make_sigma_expression(self.tau_max, j, i) 
+                      for i in now_look 
+                      for j in now_look
+                      if to_include(j,i,self.tau_max)]
+            s_exp += [make_sigma_expression(t,j,i) 
+                      for i in now_look
+                      for j in now_look
+                      for t in self.lags[1:]
+                      if to_include(j,i,t)]
+            cxs = np.array([n in now_look for n in self.variables])
+            rho_loc = list(set(self.cov[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
+            cxs_small = np.array([n in now_look if self.order(n)<last else False 
+                                  for n in self.variables])
+            rho_loc += list(set(self.cov[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
+            rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                    and Matrix(s_exp).has(rho))]
+            rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
+                                                    and not Matrix(s_exp).has(rho))]
+            now_vars = [Cs[cx] for cx in c] + rho_loc_1
+            
+            #solve
+            _check_vars(now_vars, s_exp)
+            SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
+            S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
+
+            #update
+            for i in c:
+                Cs[i] = Cs[i].subs(S_dict_local)
+                self[:,i] = self[:,i]*r[i]/Cs[i]
+                self.cov[:,:,i] = np.array(Matrix(self.cov[:,:,i]).subs(S_dict_local))
+                self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(S_dict_local))
+            
+            #calculate some more!
+            calc_dict = {}
+            last_c = c[np.array([self.order(ci) for ci in c]).squeeze()==last][0]
+            for j in now_look:
+                for i in now_look:
+                    for t in self.lags:
+                        if to_calc(j,i,t) and isinstance(self.cov[t,j,i], type(Symbol('test'))):
+                            calc_dict[self.cov[t,j,i]]=r[i]/Cs[i] \
+                                                   *np.sum(np.array([[self[k,i,v]*self.cov[t-v,j,k]
+                                                                      for k in now_look]
+                                                                     for v in self.lags]))
+            exp_here = [-k + v for k, v in calc_dict.items()]
+            ks = list(calc_dict.keys())
+            if len(exp_here)>0:
+                _check_vars(ks, exp_here)
+                SH = nsolve(exp_here, ks, [0 for i in ks])
+                calc_dict = {k: SH[i] for i, k in enumerate(ks)}
+                calc_dicts+=[calc_dict]
+                for i in c:
+                    self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(calc_dict))
+                    self.cov[:,:,i] = np.array(Matrix(self.cov[:,:,i]).subs(calc_dict))
+
+        if not _check_vars([], Matrix(np.sum(self.cov, axis=2))):
+            for cd in calc_dicts:
+                for k, v in cd.items():
+                    print("{}: {}".format(k,v))
+
+        self.s2 = np.array([(1-r[i]**2)/Cs[i]**2*Bps[i] for i in self.variables])
+        self.s2[self.s2==0]=1
+        if (self.s2>1).any():
+            raise ConvergenceError("Converged Cs produced s2>1")
+        return
+    def _check_stability(self):
+        z = Symbol("z")
+        M = Matrix(
+            np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
+            - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
+                     axis=tsGraph.AXIS_LABELS['time'])
+        ).det()
+        S = solve(M)
+        return (np.array([Abs(s) for s in S])>1).all()
+    def _R_symbol(self, i,j,l):
+        return Symbol("R{}.{}({})".format(i,j,l))
+    def _gen_coefficients_cutoffs(self, discarded_c, discarded_u, convergence_attempts):
+        if (discarded_c >= convergence_attempts 
+            or discarded_u >= convergence_attempts):
+            if discarded_u>discarded_c:
+                raise UnstableError(("No stable solution found for above graph {}; "
+                                     "tried {}x").format(id(self), discarded_u))
+            raise ConvergenceError(("No solution found for above graph {}; "
+                                    "tried {}x").format(id(self), discarded_c))
+
+        _progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
+                                                       convergence_attempts))
+    def _summarize_discarded_solutions(self, discarded_c, discarded_u):
+        if discarded_u + discarded_c > 0:
+            if discarded_u == 0:
+                print("discarded {} solution{} that did not converge".format(
+                    discarded_c, 's' if discarded_c>1 else ''))
+            elif discarded_c == 0:
+                print("discarded {} unstable solution{}".format(
+                    discarded_u, 's' if discarded_u>1 else ''))
+            else:
+                print("discarded {} solutions: {} unstable and {} that did not converge".format(
+                    discarded_u+discarded_c, discarded_u, discarded_c))
+        else:
+            print('                             ')
+    
+    #Display helper functions
+    def _get_num_cols(self):
+        return self.get_num_lags()
     def _make_table_titles(self):
         return np.array(["Lag {}".format(i) for i in self.lags])
+    def _get_coefficients(self, i, j):
+        return self[i,j]
+
+    #Magic Functions
+    def __eq__(self, G):
+        return (
+            isinstance(G, tsGraph) 
+            and self.tau_max==G.tau_max 
+            and super().__eq__(self, G)
+        )
 
 class Data(object):
     AXIS_LABELS = {'variables': 0, 'observations': 1}
