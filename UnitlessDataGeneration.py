@@ -39,7 +39,7 @@ class SortabilityPlotting():
         for i in range(r2s.shape[1]):
             _ = plt.hist(r2s[:,i], density=True, cumulative=False, bins=20, alpha=.5, label=str(i))
         plt.xlim([0,1])
-        plt.legend(title="Node")
+        plt.legend(title="Node", fontsize='small')
         plt.title(title)
         plt.xlabel("R2 score")
 
@@ -72,8 +72,12 @@ def _progress_message(msg):
     sys.stdout.write('\r')
     sys.stdout.write(msg)
     sys.stdout.flush()
-def _clear_progress_message():
+def _clear_progress_message(new_message=None):
     sys.stdout.write('\r')
+    if new_message is None:
+        print('                                                                     ')
+    else:
+        print(new_message)
 def _check_vars(now_vars, s_exp):
     missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
     if len(missing_vars)>0:
@@ -85,77 +89,11 @@ def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
     return M & ~np.diag(np.diag(M))
 
-def gen_unitless_iid_SCMs(N=20, O=100, B=5000, **kwargs):
-    Gs = [Graph(N, **kwargs).gen_coefficients() for i in range(B)]
-    for g in Gs:
-        g.gen_data(O)
-    return Gs
-
-def gen_unitless_time_series(T=1000, B=100, time_limit=5, convergence_attempts=2, **init_args):
-    r'''Method for generating data from many random SCMs.
-
-    Parameters
-    _________
-    T : int, optional (Default: 1000)
-        Number of observations in each generated time series
-    B : int, optional (Default: 100)
-        Number of SCMs (and associated data) to generate
-    time_limit : int, optional (Default: 5)
-        Maximum number of seconds to spend on each attempt at generating an SCM
-    N, tau_max, p, p_auto, init_type: parameters for graph initialization
-
-    Returns
-    _______
-    Gs : list of B Graph objects
-    Ds : list of B TimeSeries objects
-    text_trap: printed output from graph and data generation.
-    
-    '''
-    no_converge = 0
-    unstable = 0
-    diverge = 0
-    TO = 0
-
-    Gs = []
-    Ds = []
-
-    text_trap = io.StringIO()
-    while len(Gs)<B:
-        all_errors = no_converge+unstable+diverge+TO
-        _progress_message("{:.0%} completed ({} discarded)".format(
-                                len(Ds)/B, all_errors))
-        try:
-            with _time_lim(time_limit):
-                with redirect_stdout(text_trap):
-                    G = tsGraph(**init_args)
-                    G = G.gen_coefficients(convergence_attempts=convergence_attempts)
-                    D = G.gen_data(T)
-        except ConvergenceError:
-            no_converge += 1
-            continue
-        except UnstableError:
-            unstable += 1
-            continue
-        except GenerationError:
-            diverge += 1
-            continue
-        except TimeoutException:
-            TO += 1
-            continue
-        Gs+=[G]
-        Ds+=[D]
-
-    _clear_progress_message()
-    if all_errors>0:
-        print(("Discarded {} system{}: "
-               "{} that did not converge, "
-               "{} that were analytically unstable, "
-               "{} that computationally diverged, "
-               "and {} that timed out.").format(
-            all_errors, 's' if all_errors>1 else '', 
-            no_converge, unstable, diverge, TO))
-
-    return Gs, Ds, text_trap
+class DataSet(list):
+    def __repr__(self):
+        if len(self)==0:
+            return super().__repr__()
+        return "<List of {} {}{}>".format(len(self), type(self[0]).__name__, 's' if len(self)!=1 else '')
 
 #Making analysis plots
 def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 500, B = 500):
@@ -173,9 +111,11 @@ def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 5
     keys = list(adj_type_dict.keys())
     
     for k in adj_type_dict.keys():
+        print("\t{}s:".format(k))
         r2s  = np.empty((B,2, len(Ns)))*np.nan
         for n, N in enumerate(Ns):
-            Gs = gen_unitless_iid_SCMs(N,T,B,**{'init_type': 'specified', 'init': adj_type_dict[k](N)})
+            print('N = {}:'.format(N))
+            Gs = Graph.gen_dataset(N,T,B,init_args = {'init_type': 'specified', 'init': adj_type_dict[k](N)})
             r2s[:,:,n] = np.array([g.data.R2()[[0,-1]] for g in Gs]).squeeze()
         r2dict[k] = r2s
     plt.figure(figsize=(4,3))
@@ -186,7 +126,7 @@ def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 5
     plt.xlabel("Number of Parents/Children")
     plt.savefig(fname="HubR2", bbox_inches='tight')
 
-def sortability_compare_triple_types(O = 500, B = 10000):
+def sortability_compare_triple_types(O = 500, B = 50000):
     adj_types = {}
     adj_types["collider"] =np.array([[0,0,1],[0,0,1],[0,0,0]]); 
     adj_types["chain"] =np.array([[0,1,0],[0,0,1],[0,0,0]]); 
@@ -196,7 +136,8 @@ def sortability_compare_triple_types(O = 500, B = 10000):
     keys = list(adj_types.keys())
 
     for k in keys:
-        Gs = gen_unitless_iid_SCMs(N=3, O=O, B=B, **{'init_type': 'specified', 'init': adj_types[k]})
+        print("{}s:".format(k))
+        Gs = Graph.gen_dataset(N=3, O=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
         r2dict[k] = np.array([g.data.R2() for g in Gs])
 
     k = r2dict.keys()
@@ -222,7 +163,7 @@ def sortability_compare_triple_types(O = 500, B = 10000):
         plt.subplot(2,len(k),p)
         plt.xlim([0,1])
         plt.ylim([0, yl_max])
-        plt.legend()#loc = locs[p-1])
+        plt.legend(fontsize='small')#loc = locs[p-1])
         plt.title(ts[p-4]+"-scoring variable")
         plt.xlabel("R2 score")
     #plt.subplot(2, len(k), 2*len(k))
@@ -232,10 +173,15 @@ def sortability_compare_triple_types(O = 500, B = 10000):
     F.tight_layout()
     #plt.savefig(fname="triples")
 
-def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000):
+def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, tau_max=None, further_init_args={'init_type': 'no_feedback'}, coef_args={'convergence_attempts': 2}):
     p_dict = {}
     for p in ps:
-        Gs = gen_unitless_iid_SCMs(N=N, p=p, O=O, B=B)
+        print("p = {}:".format(p))
+        further_init_args['p']=p
+        if tau_max is None:
+            Gs = Graph.gen_dataset(N=N, O=O, B=B, init_args=further_init_args)
+        else:
+            Gs = tsGraph.gen_dataset(N=N, tau_max=tau_max, T=O, B=B, init_args=further_init_args, coef_args=coef_args)
         varsort = [g.sortability() for g in Gs]
         r2sort2  = [g.sortability('R2') for g in Gs]
         p_dict[p] = (varsort, r2sort2)
@@ -352,6 +298,18 @@ class Graph(object):
         '''Helper function for initializing a graph from a specified adjacency matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
                    init_type='specified', init=init, labels=labels, noise=noise)
+
+    @classmethod
+    def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
+        Gs = []
+        for i in range(B):
+            if len(Gs)%every==0:
+                _progress_message("{:.0%} completed".format(len(Gs)/B))
+            g = cls(N, **init_args).gen_coefficients(**coef_args)
+            g.gen_data(O)
+            Gs += [g]
+        _progress_message("{:.0%} completed\n".format(len(Gs)/B))
+        return DataSet(Gs)
 
     #User-available retrieval functions
     def get_adjacencies(self):
@@ -722,6 +680,9 @@ class Graph(object):
                             rep, ri, r = make_table_contents(table_id, summary_edges)
             plot_table(table_id, rep, ri, h)
                             
+        return str(self)
+
+    def __str__(self):
         return "Graph {}".format(id(self))
 
 class tsGraph(Graph):
@@ -821,6 +782,52 @@ class tsGraph(Graph):
         '''Helper function for initializing a graph from a specified adjacency matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, labels=labels, noise=noise)
+    
+    @classmethod
+    def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, verbose=False):
+        r'''Method for generating data from many random SCMs.
+    
+        Parameters
+        _________
+        N, tau_max, init_args: parameters for graph initialization
+        T : int, optional (Default: 1000)
+            Number of observations in each generated time series
+        B : int, optional (Default: 100)
+            Number of SCMs (and associated data) to generate
+        coef_args : dictionary of inputs to gen_coefficients
+        time_limit : int, optional (Default: 5)
+            Maximum number of seconds to spend on each attempt at generating an SCM
+        verbose : whether to print all output
+        '''
+        error_types = [ConvergenceError, UnstableError, GenerationError, TimeoutException]
+        errors = {k: 0 for k in error_types}
+        Gs = []
+        text_trap = io.StringIO()
+
+        while len(Gs)<B:
+            all_errors = sum(list(errors.values()))
+            _progress_message("{:.0%} completed ({} discarded)".format(
+                                len(Gs)/B, all_errors))
+            try:
+                with _time_lim(time_limit):
+                    with redirect_stdout(text_trap):
+                        g = cls(N=N, tau_max=tau_max, **init_args).gen_coefficients(**coef_args)
+                        g.gen_data(T)
+            except tuple(errors.keys()) as E:
+                errors[type(E)]+=1
+                continue
+            Gs += [g]
+
+        if all_errors > 0:
+            num_errors = len(errors.keys())
+            _clear_progress_message("Discarded {} system{} due to the following errors: ".format(all_errors, 's' if all_errors>1 else ''))
+            print((", and ".join([(", ".join(["{} {}{}"]*(num_errors-1))), "{} {}{}"])).format(*sum(((v, k.__name__, 's' if v!=1 else '') for k, v in errors.items()),())))
+        else:
+            _progress_message("{:.0%} completed ({} discarded)\n".format(
+                                len(Gs)/B, all_errors))
+        if verbose:
+            print(text_trap.get_value())
+        return DataSet(Gs)
 
     #User-available retrieval functions
     #order, get_num_parents, ancestry, select_vars
@@ -907,7 +914,7 @@ class tsGraph(Graph):
         while not stable:
             self._gen_coefficients_cutoffs(discarded_c, discarded_u, convergence_attempts)
             try:
-                super().gen_coefficients(style)
+                super().gen_coefficients(style=style)
             except ValueError:
                 discarded_c +=1
                 continue
@@ -915,11 +922,10 @@ class tsGraph(Graph):
             if not stable:
                 discarded_u += 1
 
-        _clear_progress_message()
         self._summarize_discarded_solutions(discarded_c, discarded_u)
         return self
         
-    def gen_data(self, T=1000):
+    def gen_data(self, T=1000, generation_attempts=2):
         r'''
         Generates time series data from the SCM given by causal coefficients self.A 
         and noises self.s2. T (an integer) determines the length of the generated
@@ -929,59 +935,61 @@ class tsGraph(Graph):
         generation, or more than 1000 for 'unit-variance-noise' generation), this
         raises a GenerationError.
         '''
-        U = np.random.normal(size=(self.N, T+self.get_num_lags()))
-        X = np.zeros(U.shape)
-        prelim_steps = self.N*self.get_num_lags()-1
-        RHOp = np.zeros((prelim_steps,prelim_steps))
-        def get_loc(idx):
-            return self.topo_order[idx%self.N],idx//self.N
-        if self.cov is not None:
-            for idx in range(prelim_steps):
-                i,t = get_loc(idx)
-                for jdx in range(idx+1):
-                    j,v = get_loc(jdx)
-                    RHOp[jdx, idx] = self.cov[t-v, j, i]
-        for idx in range(prelim_steps):
-            xloc = get_loc(idx)
+        for a in range(generation_attempts):
+            U = np.random.normal(size=(self.N, T+self.get_num_lags()))
+            X = np.zeros(U.shape)
+            prelim_steps = self.N*self.get_num_lags()-1
+            RHOp = np.zeros((prelim_steps,prelim_steps))
+            def get_loc(idx):
+                return self.topo_order[idx%self.N],idx//self.N
             if self.cov is not None:
-                to_parents = RHOp[:idx,idx]
-                between_parents = RHOp[:idx,:idx]
-                coefs = np.array(symbols(["a{}".format(j) for j in range(len(to_parents))]))
-                expressions = []
-                for j, p_ji in enumerate(to_parents):
-                    expressions += [-p_ji + np.sum(np.array([a_k*between_parents[k,j] 
-                                                             for k, a_k in enumerate(coefs)]))]
-                if len(coefs)>0:
-                    Ap = np.array(nsolve(expressions, coefs, [1 for i in coefs]))[:,0]
-                    s2 = 1 - np.sum(np.array([[a_j*a_k*between_parents[j,k] 
-                                               for j, a_j in enumerate(Ap)] 
-                                              for k, a_k in enumerate(Ap)]))
-                    for i, a in enumerate(Ap):
-                        X[xloc]+=a*X[get_loc(i)]
+                for idx in range(prelim_steps):
+                    i,t = get_loc(idx)
+                    for jdx in range(idx+1):
+                        j,v = get_loc(jdx)
+                        RHOp[jdx, idx] = self.cov[t-v, j, i]
+            for idx in range(prelim_steps):
+                xloc = get_loc(idx)
+                if self.cov is not None:
+                    to_parents = RHOp[:idx,idx]
+                    between_parents = RHOp[:idx,:idx]
+                    coefs = np.array(symbols(["a{}".format(j) for j in range(len(to_parents))]))
+                    expressions = []
+                    for j, p_ji in enumerate(to_parents):
+                        expressions += [-p_ji + np.sum(np.array([a_k*between_parents[k,j] 
+                                                                 for k, a_k in enumerate(coefs)]))]
+                    if len(coefs)>0:
+                        Ap = np.array(nsolve(expressions, coefs, [1 for i in coefs]))[:,0]
+                        s2 = 1 - np.sum(np.array([[a_j*a_k*between_parents[j,k] 
+                                                   for j, a_j in enumerate(Ap)] 
+                                                  for k, a_k in enumerate(Ap)]))
+                        for i, a in enumerate(Ap):
+                            X[xloc]+=a*X[get_loc(i)]
+                    else:
+                        s2=1
+                    if s2<0:
+                        s2=0
+                    X[xloc]+=s2**.5*U[xloc]
                 else:
-                    s2=1
-                if s2<0:
-                    s2=0
-                X[xloc]+=s2**.5*U[xloc]
+                    X[xloc]=U[xloc]
+            for idx in range(prelim_steps, self.N*T):
+                i, t = get_loc(idx)
+                s2i = self.s2[i] if self.s2 is not None else 1
+                X[i,t] = (s2i**.5*U[i,t]
+                          + np.sum(np.array([[self[j,i,v]*X[j,t-v]
+                                              for v in self.lags]
+                                             for j in self.variables])))
+            TS = TimeSeries(self.N, T, self.labels, X[:,self.get_num_lags():])
+            V = TS.var()
+            if self.style=='standardized':
+                cutoff=2
             else:
-                X[xloc]=U[xloc]
-        for idx in range(prelim_steps, self.N*T):
-            i, t = get_loc(idx)
-            s2i = self.s2[i] if self.s2 is not None else 1
-            X[i,t] = (s2i**.5*U[i,t]
-                      + np.sum(np.array([[self[j,i,v]*X[j,t-v]
-                                          for v in self.lags]
-                                         for j in self.variables])))
-        TS = TimeSeries(self.N, T, self.labels, X[:,self.get_num_lags():])
-        V = TS.var()
-        if self.style=='standardized':
-            cutoff=2
-        else:
-            cutoff=1000
-        if ((V>cutoff) | (V<.2)).any():
-            raise GenerationError("generated data has variance too var from 1: {}".format(V))
-        self.data = TS
-        return self.data
+                cutoff=1000
+            if ((V>cutoff) | (V<.2)).any():
+                continue
+            self.data = TS
+            return self.data
+        raise GenerationError("generated data has variance too var from 1: {} (tried {}x)".format(V, generation_attempts))
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
@@ -1047,18 +1055,11 @@ class tsGraph(Graph):
         A, r = super()._initial_draws(P)
         Bp_init = self.get_adjacencies().astype(float)
         Bp=Bp_init*np.random.normal(size=Bp_init.shape)
-        B = self.sum(axis='time')
+        B = self.sum(matrix=A, axis='time')
         for i in self.variables:
             for j in self.variables:
                 if B[i,j]!=0:
                     A[i,j]*=Bp[i,j]/B[i,j]
-        return A, r
-        
-        A = np.random.normal(size=self.shape) #coefficient draws -- a'
-        r = np.random.uniform(size=(self.N,)) #starting draws -- r
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            r=r**(1/P)
         return A, r
     def _rescale_coefficients(self, r, P):
         #construct symbols
@@ -1201,18 +1202,18 @@ class tsGraph(Graph):
         _progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
                                                        convergence_attempts))
     def _summarize_discarded_solutions(self, discarded_c, discarded_u):
+        new_msg = None
         if discarded_u + discarded_c > 0:
             if discarded_u == 0:
-                print("discarded {} solution{} that did not converge".format(
-                    discarded_c, 's' if discarded_c>1 else ''))
+                new_msg = "discarded {} solution{} that did not converge".format(
+                    discarded_c, 's' if discarded_c>1 else '')
             elif discarded_c == 0:
-                print("discarded {} unstable solution{}".format(
-                    discarded_u, 's' if discarded_u>1 else ''))
+                new_msg = "discarded {} unstable solution{}".format(
+                    discarded_u, 's' if discarded_u>1 else '')
             else:
-                print("discarded {} solutions: {} unstable and {} that did not converge".format(
-                    discarded_u+discarded_c, discarded_u, discarded_c))
-        else:
-            print('                             ')
+                new_msg = "discarded {} solutions: {} unstable and {} that did not converge".format(
+                    discarded_u+discarded_c, discarded_u, discarded_c)
+        _clear_progress_message(new_msg)
     
     #Display helper functions
     def _get_num_cols(self):
