@@ -826,7 +826,7 @@ class tsGraph(Graph):
             _progress_message("{:.0%} completed ({} discarded)\n".format(
                                 len(Gs)/B, all_errors))
         if verbose:
-            print(text_trap.get_value())
+            print(text_trap.read())
         return DataSet(Gs)
 
     #User-available retrieval functions
@@ -936,50 +936,19 @@ class tsGraph(Graph):
         raises a GenerationError.
         '''
         for a in range(generation_attempts):
-            U = np.random.normal(size=(self.N, T+self.get_num_lags()))
+            U = np.random.normal(size=(self.N, T+self.tau_max))
             X = np.zeros(U.shape)
-            prelim_steps = self.N*self.get_num_lags()-1
-            RHOp = np.zeros((prelim_steps,prelim_steps))
+            X[:,:self.tau_max] = self._gen_initial_values()
             def get_loc(idx):
                 return self.topo_order[idx%self.N],idx//self.N
-            if self.cov is not None:
-                for idx in range(prelim_steps):
-                    i,t = get_loc(idx)
-                    for jdx in range(idx+1):
-                        j,v = get_loc(jdx)
-                        RHOp[jdx, idx] = self.cov[t-v, j, i]
-            for idx in range(prelim_steps):
-                xloc = get_loc(idx)
-                if self.cov is not None:
-                    to_parents = RHOp[:idx,idx]
-                    between_parents = RHOp[:idx,:idx]
-                    coefs = np.array(symbols(["a{}".format(j) for j in range(len(to_parents))]))
-                    expressions = []
-                    for j, p_ji in enumerate(to_parents):
-                        expressions += [-p_ji + np.sum(np.array([a_k*between_parents[k,j] 
-                                                                 for k, a_k in enumerate(coefs)]))]
-                    if len(coefs)>0:
-                        Ap = np.array(nsolve(expressions, coefs, [1 for i in coefs]))[:,0]
-                        s2 = 1 - np.sum(np.array([[a_j*a_k*between_parents[j,k] 
-                                                   for j, a_j in enumerate(Ap)] 
-                                                  for k, a_k in enumerate(Ap)]))
-                        for i, a in enumerate(Ap):
-                            X[xloc]+=a*X[get_loc(i)]
-                    else:
-                        s2=1
-                    if s2<0:
-                        s2=0
-                    X[xloc]+=s2**.5*U[xloc]
-                else:
-                    X[xloc]=U[xloc]
-            for idx in range(prelim_steps, self.N*T):
+            for idx in range(self.N*self.tau_max, np.prod(X.shape)):
                 i, t = get_loc(idx)
                 s2i = self.s2[i] if self.s2 is not None else 1
                 X[i,t] = (s2i**.5*U[i,t]
                           + np.sum(np.array([[self[j,i,v]*X[j,t-v]
                                               for v in self.lags]
                                              for j in self.variables])))
-            TS = TimeSeries(self.N, T, self.labels, X[:,self.get_num_lags():])
+            TS = TimeSeries(self.N, T, self.labels, X[:,self.tau_max:])
             V = TS.var()
             if self.style=='standardized':
                 cutoff=2
@@ -1214,6 +1183,22 @@ class tsGraph(Graph):
                 new_msg = "discarded {} solutions: {} unstable and {} that did not converge".format(
                     discarded_u+discarded_c, discarded_u, discarded_c)
         _clear_progress_message(new_msg)
+
+    #generation helper funtions
+    def _make_flat_cov_array(self):
+        d = self.N*self.tau_max
+        COV = (np.ones((d,d))*np.nan)
+        def irange(l):
+            return slice(self.N*l,self.N*(l+1))
+        for l1 in range(self.tau_max):
+            for l2 in range(self.tau_max):
+                COV[irange(l1),irange(l2)]=self.cov[l2-l1]
+        return COV
+    def _gen_initial_values(self):
+        COV = self._make_flat_cov_array()
+        CSR = np.linalg.cholesky(COV)
+        X = np.matmul(CSR, np.random.normal(size=(COV.shape[0], 1)))
+        return X.reshape((self.N,self.tau_max), order='F')            
     
     #Display helper functions
     def _get_num_cols(self):
