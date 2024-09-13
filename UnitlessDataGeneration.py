@@ -173,7 +173,7 @@ def sortability_compare_triple_types(O = 500, B = 50000):
     F.tight_layout()
     #plt.savefig(fname="triples")
 
-def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, tau_max=None, further_init_args={'init_type': 'no_feedback'}, coef_args={'convergence_attempts': 2}):
+def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, tau_max=None, further_init_args={'init_type': 'no_feedback'}, coef_args={'convergence_attempts': 5}):
     p_dict = {}
     for p in ps:
         print("p = {}:".format(p))
@@ -472,11 +472,11 @@ class Graph(object):
         if matrix is None:
             matrix=self.A
         return self.select_vars(np.argsort(self.topo_order), A=matrix)
-    def _rescale_coefficients(self, r, P):
-        #Need to go through by topological order!
+    def _calc_C(self, r, P, matrix=None):
         ind_length = (self**2).sum(axis='source') #constant when parents are independent
         loc_cov = self.select_vars(self.topo_order, A=self.cov)
         A_loc = self.select_vars(self.topo_order)
+        Cs = np.zeros((self.N,))
         for it, i in enumerate(self.topo_order):
             if P[i]==0:
                 continue
@@ -486,9 +486,14 @@ class Graph(object):
             R_i = loc_cov[:it,:it]
             Ci = ((r_i**2*np.matmul(np.matmul(Ap.T, R_i), Ap) + (1-r_i**2)*norm)**.5)[0,0]
             A_loc[:,it] *= r_i/Ci
-            self.s2[i] = ((1-r_i**2)*norm)**.5/Ci
+            Cs[i]=Ci
             loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
             loc_cov[it,:] = loc_cov[:,it]
+        return Cs, loc_cov, A_loc
+    def _rescale_coefficients(self, r, P):
+        #Need to go through by topological order!
+        Cs, loc_cov, A_loc = self._calc_C(r, P)
+        self.s2 = [((1-r[i]**2)*ind_length[i])**.5/Cs[i] for i in self.variables]
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
 
@@ -784,7 +789,7 @@ class tsGraph(Graph):
                    init_type='specified', init=init, labels=labels, noise=noise)
     
     @classmethod
-    def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, verbose=False):
+    def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, verbose=False, text_trap=None):
         r'''Method for generating data from many random SCMs.
     
         Parameters
@@ -802,7 +807,8 @@ class tsGraph(Graph):
         error_types = [ConvergenceError, UnstableError, GenerationError, TimeoutException]
         errors = {k: 0 for k in error_types}
         Gs = []
-        text_trap = io.StringIO()
+        if text_trap is None:
+            text_trap = io.StringIO()
 
         while len(Gs)<B:
             all_errors = sum(list(errors.values()))
@@ -910,19 +916,23 @@ class tsGraph(Graph):
         stable = False
         discarded_u = 0
         discarded_c = 0
+        discarded_psd = 0
 
         while not stable:
-            self._gen_coefficients_cutoffs(discarded_c, discarded_u, convergence_attempts)
-            try:
-                super().gen_coefficients(style=style)
-            except ValueError:
-                discarded_c +=1
-                continue
+            self._gen_coefficients_cutoffs(discarded_c, discarded_u, discarded_psd, convergence_attempts)
+            #try:
+            super().gen_coefficients(style=style)
+            #except ValueError:
+            #    discarded_c +=1
+            #    continue
+            #except ConvergenceError:
+            #    discarded_psd +=1
+            #    continue
             stable = self._check_stability()
             if not stable:
                 discarded_u += 1
 
-        self._summarize_discarded_solutions(discarded_c, discarded_u)
+        self._summarize_discarded_solutions(discarded_c, discarded_u, discarded_psd)
         return self
         
     def gen_data(self, T=1000, generation_attempts=2):
@@ -990,14 +1000,15 @@ class tsGraph(Graph):
         if self.p_auto is None:
             self.p_auto=p
         super()._make_random(adjust_p(p, self.tau_max+1))
-        self.p_auto = adjust_p(self.p_auto, self.tau_max)
-        #set auto-dependencies using p_auto
-        for t in self.lags[1:]:
-            for i in self.variables:
-                self[i,i,t] = self._rand_edges(self.p_auto)
-        if self.init_type=='no_feedback':
-            #removed lagged edges in reverse-topological order
-            self.i_triu()
+        if self.tau_max>0:
+            self.p_auto = adjust_p(self.p_auto, self.tau_max)
+            #set auto-dependencies using p_auto
+            for t in self.lags[1:]:
+                for i in self.variables:
+                    self[i,i,t] = self._rand_edges(self.p_auto)
+            if self.init_type=='no_feedback':
+                #removed lagged edges in reverse-topological order
+                self.i_triu()
 
     #gen_coefficients helper functions
     #_reset_adjaceny_matrix, _reset_s2, _re_sort
@@ -1011,12 +1022,15 @@ class tsGraph(Graph):
                     [i_t, j_t] = self.topo_order[[i,j]]
                     RHOs[0,i_t, j_t] = self._R_symbol(i_t,j_t,0)
                     RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
-            RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
-                                                      for j in self.variables] 
-                                                     for t in self.lags[1:]])
+            if self.tau_max > 0:
+                RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
+                                                          for j in self.variables] 
+                                                         for t in self.lags[1:]])
+                for t in range(-self.tau_max, 0):
+                    RHOs[t,:,:] = RHOs[-t,:,:].T
+            else:
+                RHOs[0, self.topo_order[-1],:]=0
             RHOs[self.tau_max,:,self.topo_order[-1]]=0
-            for t in range(-self.tau_max, 0):
-                RHOs[t,:,:] = RHOs[-t,:,:].T
             self.cov = RHOs
         else:
             self.cov = None
@@ -1143,12 +1157,17 @@ class tsGraph(Graph):
                 for k, v in cd.items():
                     print("{}: {}".format(k,v))
 
+        if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[0].astype(float))<0):
+            raise ConvergenceError("covariance matrix not positive semi-definite")
+
         self.s2 = np.array([(1-r[i]**2)/Cs[i]**2*Bps[i] for i in self.variables])
         self.s2[self.s2==0]=1
         if (self.s2>1).any():
-            raise ConvergenceError("Converged Cs produced s2>1")
+            raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s2))
         return
     def _check_stability(self):
+        if self.tau_max==0:
+            return True
         z = Symbol("z")
         M = Matrix(
             np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
@@ -1159,29 +1178,32 @@ class tsGraph(Graph):
         return (np.array([Abs(s) for s in S])>1).all()
     def _R_symbol(self, i,j,l):
         return Symbol("R{}.{}({})".format(i,j,l))
-    def _gen_coefficients_cutoffs(self, discarded_c, discarded_u, convergence_attempts):
+    def _gen_coefficients_cutoffs(self, discarded_c, discarded_u, discarded_psd, convergence_attempts):
+        bad_sols = discarded_u + discarded_psd
         if (discarded_c >= convergence_attempts 
-            or discarded_u >= convergence_attempts):
-            if discarded_u>discarded_c:
-                raise UnstableError(("No stable solution found for above graph {}; "
-                                     "tried {}x").format(id(self), discarded_u))
+            or bad_sols >= convergence_attempts):
+            if bad_sols > discarded_c:
+                raise UnstableError(("No stable solution with a positive semi-definite covariance matrix"
+                                     " found for above graph {}; tried {}x "
+                                     "({} unstable, {} not positive semi-definite)").format(
+                    id(self), bad_sols, discarded_u, discarded_psd))
             raise ConvergenceError(("No solution found for above graph {}; "
                                     "tried {}x").format(id(self), discarded_c))
 
         _progress_message("Attempt {}/{}".format(discarded_c+discarded_u+1, 
                                                        convergence_attempts))
-    def _summarize_discarded_solutions(self, discarded_c, discarded_u):
+    def _summarize_discarded_solutions(self, discarded_c, discarded_u, discarded_psd):
         new_msg = None
-        if discarded_u + discarded_c > 0:
-            if discarded_u == 0:
+        if discarded_u + discarded_c + discarded_psd> 0:
+            if discarded_u + discarded_psd == 0:
                 new_msg = "discarded {} solution{} that did not converge".format(
                     discarded_c, 's' if discarded_c>1 else '')
             elif discarded_c == 0:
-                new_msg = "discarded {} unstable solution{}".format(
-                    discarded_u, 's' if discarded_u>1 else '')
+                new_msg = "discarded {} unstable solution{} and {} solution{} producing a covariance matrix that was not positive semi-definite".format(
+                    discarded_u, 's' if discarded_u!=1 else '', discarded_psd, 's' if discarded_psd!=1 else '')
             else:
-                new_msg = "discarded {} solutions: {} unstable and {} that did not converge".format(
-                    discarded_u+discarded_c, discarded_u, discarded_c)
+                new_msg = "discarded {} solutions: {} unstable, {} producing a non-positive semi-definite covariance matrix, and {} that did not converge".format(
+                    discarded_u+discarded_c+discarded_psd, discarded_u, discarded_psd, discarded_c)
         _clear_progress_message(new_msg)
 
     #generation helper funtions
