@@ -452,7 +452,8 @@ class Graph(object):
         self *= np.random.choice(a=[-1,1], size=self.shape)
     def _gen_coefficients_standardized(self):
         P = self.get_num_parents()
-        A, r = self._initial_draws(P)
+        A = self._initial_draws_A()
+        r = self._initial_draws_r(P)
         self *= A
         self._rescale_coefficients(r, P)
     def _reset_adjacency_matrix(self):
@@ -461,20 +462,21 @@ class Graph(object):
         self.cov = np.diag(np.ones((self.N,)))
     def _reset_s2(self):
         self.s2 = np.ones((self.N,))  
-    def _initial_draws(self, P):
-        A = np.random.normal(size=self.shape) #coefficient draws -- a'
+    def _initial_draws_A(self):
+        return np.random.normal(size=self.shape) #coefficient draws -- a'
+    def _initial_draws_r(self, P):
         r = np.random.uniform(size=(self.N,)) #starting draws -- r
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r=r**(1/P)
-        return A, r
+        return r
     def _re_sort(self, matrix=None):
         if matrix is None:
             matrix=self.A
         return self.select_vars(np.argsort(self.topo_order), A=matrix)
     def _calc_C(self, r, P, matrix=None):
         ind_length = (self**2).sum(axis='source') #constant when parents are independent
-        loc_cov = self.select_vars(self.topo_order, A=self.cov)
+        loc_cov = deepcopy(self.select_vars(self.topo_order, A=self.cov))
         A_loc = self.select_vars(self.topo_order)
         Cs = np.zeros((self.N,))
         for it, i in enumerate(self.topo_order):
@@ -489,10 +491,10 @@ class Graph(object):
             Cs[i]=Ci
             loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
             loc_cov[it,:] = loc_cov[:,it]
-        return Cs, loc_cov, A_loc
+        return Cs, loc_cov, A_loc, ind_length
     def _rescale_coefficients(self, r, P):
         #Need to go through by topological order!
-        Cs, loc_cov, A_loc = self._calc_C(r, P)
+        Cs, loc_cov, A_loc, ind_length = self._calc_C(r, P)
         self.s2 = [((1-r[i]**2)*ind_length[i])**.5/Cs[i] for i in self.variables]
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
@@ -521,9 +523,11 @@ class Graph(object):
         if matrix is None:
             matrix=self.A.copy()
         if type(axis) is tuple:
-            return func(matrix, axis=tuple(self.AXIS_LABELS[a] for a in axis))
-        return func(matrix, axis=self.AXIS_LABELS[axis])
-    def sum(self, axis=None, matrix=None):
+            axis = tuple((a if type(a) is int else self.AXIS_LABELS[a] for a in axis))
+        elif type(axis) is not int:
+            axis = self.AXIS_LABELS[axis]
+        return func(matrix, axis=axis)
+    def sum(self, axis=None, matrix=None, out=None):
         return self._pass_on_solo(np.sum, axis, matrix)
     def any(self, axis=None, matrix=None):
         return self._pass_on_solo(np.any, axis, matrix)
@@ -1014,51 +1018,74 @@ class tsGraph(Graph):
     #_reset_adjaceny_matrix, _reset_s2, _re_sort
     def _reset_cov(self):
         if self.style=='standardized':
-            RHOs = (np.ones((2*self.tau_max+1, self.N, self.N))*np.nan).astype(object)
+            RHOs = (np.ones((self.N, self.N, 2*self.tau_max+1))*np.nan).astype(object)
             for i in self.variables:
-                RHOs[0,i,i] = 1
+                RHOs[i,i,0] = 1
             for i in range(self.N-1):
                 for j in range(i+1,self.N):
                     [i_t, j_t] = self.topo_order[[i,j]]
-                    RHOs[0,i_t, j_t] = self._R_symbol(i_t,j_t,0)
-                    RHOs[0,j_t, i_t] = RHOs[0,i_t, j_t]
+                    RHOs[i_t, j_t,0] = self._R_symbol(i_t,j_t,0)
+                    RHOs[j_t, i_t,0] = RHOs[i_t, j_t,0]
             if self.tau_max > 0:
-                RHOs[1:(self.tau_max+1),:,:] = np.array([[[self._R_symbol(j,k,t) for k in self.variables] 
-                                                          for j in self.variables] 
-                                                         for t in self.lags[1:]])
+                RHOs[:,:,1:(self.tau_max+1)] = np.array([[[self._R_symbol(j,k,t) for t in self.lags[1:]]
+                                                           for k in self.variables] 
+                                                          for j in self.variables])
                 for t in range(-self.tau_max, 0):
-                    RHOs[t,:,:] = RHOs[-t,:,:].T
-            else:
-                RHOs[0, self.topo_order[-1],:]=0
-            RHOs[self.tau_max,:,self.topo_order[-1]]=0
+                    RHOs[:,:,t] = RHOs[:,:,-t].T
+            #RHOs[self.tau_max,:,self.topo_order[-1]]=0
+            #RHOs[-self.tau_max,self.topo_order[-1],:]=0
             self.cov = RHOs
         else:
             self.cov = None
-    def _initial_draws(self, P):
-        A, r = super()._initial_draws(P)
-        Bp_init = self.get_adjacencies().astype(float)
-        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
-        B = self.sum(matrix=A, axis='time')
+    def _initial_draws_A(self):
+        A = np.zeros((self.shape))
+        lags_per_process = self.sum(axis='time')#relying on the fact that the adjacency matrix has already been reset
         for i in self.variables:
             for j in self.variables:
-                if B[i,j]!=0:
-                    A[i,j]*=Bp[i,j]/B[i,j]
-        return A, r
+                if lags_per_process[i,j]!=0:
+                    A[i,j] = np.random.normal(size=(1,1,self.get_num_lags()), scale=1.0/lags_per_process[i,j])
+        return A
+        #    def _initial_draws(self, P):
+#        A, r = super()._initial_draws(P)
+#        Bp_init = self.get_adjacencies().astype(float)
+#        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
+#        B = self.sum(matrix=A, axis='time')
+#        for i in self.variables:
+#            for j in self.variables:
+#                if B[i,j]!=0:
+#                    A[i,j]*=Bp[i,j]/B[i,j]
+#        return A, r
+    def _calc_C_guess(self, r, P, i, it):
+        norm = self.sum(matrix=self[:,[i],:]**2, axis=('source', 'time'))
+        Ap = self.select_vars(self.topo_order[:(it+1)])[:it,[it]]
+        loc_cov = self.select_vars(self.topo_order[:it], A=self.cov)
+        for i in range(it):
+            for j in range(it):
+                for t in range(-self.tau_max, self.tau_max+1):
+                    if isinstance(loc_cov[i,j,t], type(Symbol('test'))):
+                        loc_cov[i,j,t]=0
+        loc_cov = loc_cov.astype(float)
+        matmulres = 0
+        for l in self.lags:
+            for v in self.lags:
+                matmulres+=np.matmul(np.matmul(Ap[:,:,l].T, loc_cov[:,:,l-v]), Ap[:,:,v])
+        return np.real(((r**2*matmulres + (1-r**2)*norm)**.5)[0,0])
     def _rescale_coefficients(self, r, P):
         #construct symbols
-        Cs = symbols(["C"+str(i) for i in self.variables])
+        Cs = np.array(symbols(["C"+str(i) for i in self.variables]))
+        Cs[P==0]=1
         def make_sigma_expression(t,j,i):
-            return (-self.cov[t,j,i] 
-                    + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*self.cov[t-v,j,k] 
+            return (-self.cov[j,i,t] 
+                    + r[i]/Cs[i]*np.sum(np.array([[self[k,i,v]*self.cov[j,k,t-v] 
                                                    for k in self.variables] 
                                                   for v in self.lags])))
 
-        Bp = self.sum(axis='time')
-        Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
-        Bps[Bps==0]=1
+        Bps = self.sum(matrix=self**2, axis=('time', 'source'))
+        #Bp = self.sum(axis='time')
+        #Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
+        #Bps[Bps==0]=1
                     
         for idc, c in enumerate(self.components):
-            calc_dicts = []
             #construct system of equations
             anc = self.ancestry()
             Ps = np.arange(self.N)[self.any(matrix=anc[:,c], axis='sink')]
@@ -1080,7 +1107,7 @@ class tsGraph(Graph):
                     return j in Ps
                 return False
             def to_calc(j,i,t):
-                if t==self.tau_max and self.order(i)==last and self.order(i)<self.N-1:
+                if t==self.tau_max and self.order(i)==last:
                     return True
                 if j in c:
                     return i not in Ps
@@ -1088,7 +1115,7 @@ class tsGraph(Graph):
                     return j not in Ps
                 return False
             s_exp = [-Cs[i]**2 
-                     + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*self.cov[t-v,j,k]
+                     + r[i]**2*np.sum(np.array([[[[self[j,i,t]*self[k,i,v]*self.cov[j,k,t-v]
                                                    for j in self.variables] 
                                                   for k in self.variables]
                                                  for t in self.lags]
@@ -1108,27 +1135,33 @@ class tsGraph(Graph):
                       for t in self.lags[1:]
                       if to_include(j,i,t)]
             cxs = np.array([n in now_look for n in self.variables])
-            rho_loc = list(set(self.cov[:,cxs,:][:,:,cxs][:self.tau_max,:,:].flatten()))
+            rho_loc = list(set(self.select_vars(cxs,A=self.cov)[:,:,:self.tau_max].flatten()))
             cxs_small = np.array([n in now_look if self.order(n)<last else False 
                                   for n in self.variables])
-            rho_loc += list(set(self.cov[:,cxs,:][:,:,cxs_small][self.tau_max,:,:].flatten()))
+            rho_loc += list(set(self.cov[cxs,:,:][:,cxs_small,:][:,:,self.tau_max].flatten()))
             rho_loc_1 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
                                                     and Matrix(s_exp).has(rho))]
             rho_loc_2 = [rho for rho in rho_loc if (isinstance(rho, type(Symbol('test'))) 
                                                     and not Matrix(s_exp).has(rho))]
-            now_vars = [Cs[cx] for cx in c] + rho_loc_1
+            now_cs = [Cs[cx] for cx in c if isinstance(Cs[cx], type(Symbol('test')))]
+            C_guesses = [self._calc_C_guess(r[i], P[i], i, self.order(i)[0]) for i in c if isinstance(Cs[i], type(Symbol('test')))]
+            now_vars = now_cs + rho_loc_1
             
-            #solve
-            _check_vars(now_vars, s_exp)
-            SSSS = nsolve(s_exp, now_vars, [1 for i in c]+[0 for i in rho_loc_1])
-            S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
+            if len(now_vars)>0:
+                #solve
+                _check_vars(now_vars, s_exp)
+                SSSS = nsolve(s_exp, now_vars, C_guesses+[0 for i in rho_loc_1])
+                S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
 
-            #update
-            for i in c:
-                Cs[i] = Cs[i].subs(S_dict_local)
-                self[:,i] = self[:,i]*r[i]/Cs[i]
-                self.cov[:,:,i] = np.array(Matrix(self.cov[:,:,i]).subs(S_dict_local))
-                self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(S_dict_local))
+                #for i in range(len(now_cs)):
+                    #print("{}: guessed {}, found {}".format(now_cs[i], C_guesses[i], S_dict_local[now_cs[i]]))
+
+                #update
+                for i in c:
+                    Cs[i] = Cs[i].subs(S_dict_local)
+                    self[:,i] = self[:,i]*r[i]/Cs[i]
+                    self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(S_dict_local))
+                    self.cov[i,:,:] = np.array(Matrix(self.cov[i,:,:]).subs(S_dict_local))
             
             #calculate some more!
             calc_dict = {}
@@ -1136,28 +1169,28 @@ class tsGraph(Graph):
             for j in now_look:
                 for i in now_look:
                     for t in self.lags:
-                        if to_calc(j,i,t) and isinstance(self.cov[t,j,i], type(Symbol('test'))):
-                            calc_dict[self.cov[t,j,i]]=r[i]/Cs[i] \
-                                                   *np.sum(np.array([[self[k,i,v]*self.cov[t-v,j,k]
+                        if to_calc(j,i,t) and isinstance(self.cov[j,i,t], type(Symbol('test'))):
+                            calc_dict[self.cov[j,i,t]]= np.sum(np.array([[self[k,i,v]*self.cov[j,k,t-v]
                                                                       for k in now_look]
-                                                                     for v in self.lags]))
+                                                                     for v in self.lags])) #*r[i]/Cs[i]
             exp_here = [-k + v for k, v in calc_dict.items()]
             ks = list(calc_dict.keys())
             if len(exp_here)>0:
                 _check_vars(ks, exp_here)
                 SH = nsolve(exp_here, ks, [0 for i in ks])
                 calc_dict = {k: SH[i] for i, k in enumerate(ks)}
-                calc_dicts+=[calc_dict]
                 for i in c:
+                    self.cov[i,:,:] = np.array(Matrix(self.cov[i,:,:]).subs(calc_dict))
                     self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(calc_dict))
-                    self.cov[:,:,i] = np.array(Matrix(self.cov[:,:,i]).subs(calc_dict))
 
-        if not _check_vars([], Matrix(np.sum(self.cov, axis=2))):
-            for cd in calc_dicts:
-                for k, v in cd.items():
-                    print("{}: {}".format(k,v))
+        _check_vars([], Matrix(np.sum(self.cov, axis=2)))
 
-        if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[0].astype(float))<0):
+        self.cov[:,self.topo_order[-1],self.tau_max]=0
+        self.cov[self.topo_order[-1],:,-self.tau_max]=self.cov[:,self.topo_order[-1],self.tau_max].T
+
+        #TODO calculate the 'unneeded' covariances now to make sure result is positive semi-definite
+
+        if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[:,:,0].astype(float))<0):
             raise ConvergenceError("covariance matrix not positive semi-definite")
 
         self.s2 = np.array([(1-r[i]**2)/Cs[i]**2*Bps[i] for i in self.variables])
@@ -1214,7 +1247,7 @@ class tsGraph(Graph):
             return slice(self.N*l,self.N*(l+1))
         for l1 in range(self.tau_max):
             for l2 in range(self.tau_max):
-                COV[irange(l1),irange(l2)]=self.cov[l2-l1]
+                COV[irange(l1),irange(l2)]=self.cov[:,:,l2-l1]
         return COV
     def _gen_initial_values(self):
         COV = self._make_flat_cov_array()
