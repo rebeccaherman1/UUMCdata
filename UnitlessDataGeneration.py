@@ -173,7 +173,7 @@ def sortability_compare_triple_types(O = 500, B = 50000):
     F.tight_layout()
     #plt.savefig(fname="triples")
 
-def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, tau_max=None, further_init_args={'init_type': 'no_feedback'}, coef_args={'convergence_attempts': 5}):
+def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, tau_max=None, further_init_args={}, coef_args={'convergence_attempts': 5}):
     p_dict = {}
     for p in ps:
         print("p = {}:".format(p))
@@ -478,9 +478,10 @@ class Graph(object):
         ind_length = (self**2).sum(axis='source') #constant when parents are independent
         loc_cov = deepcopy(self.select_vars(self.topo_order, A=self.cov))
         A_loc = self.select_vars(self.topo_order)
-        Cs = np.zeros((self.N,))
+        Cs = np.ones((self.N,))
         for it, i in enumerate(self.topo_order):
             if P[i]==0:
+                ind_length[i]=1
                 continue
             Ap = A_loc[:it,[it]]
             r_i = r[i]
@@ -495,7 +496,7 @@ class Graph(object):
     def _rescale_coefficients(self, r, P):
         #Need to go through by topological order!
         Cs, loc_cov, A_loc, ind_length = self._calc_C(r, P)
-        self.s2 = [((1-r[i]**2)*ind_length[i])**.5/Cs[i] for i in self.variables]
+        self.s2 = np.divide(((1-r**2)*ind_length)**.5,Cs)
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
 
@@ -1148,10 +1149,13 @@ class tsGraph(Graph):
             now_vars = now_cs + rho_loc_1
             
             if len(now_vars)>0:
-                #solve
                 _check_vars(now_vars, s_exp)
-                SSSS = nsolve(s_exp, now_vars, C_guesses+[0 for i in rho_loc_1])
-                S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
+                if len(rho_loc_1)==0:
+                    S_dict_local = {k: C_guesses[i] for i, k in enumerate(now_cs)}
+                else:
+                    #solve
+                    SSSS = nsolve(s_exp, now_vars, C_guesses+[0 for i in rho_loc_1])
+                    S_dict_local = {k: SSSS[i] for i, k in enumerate(now_vars)}
 
                 #for i in range(len(now_cs)):
                     #print("{}: guessed {}, found {}".format(now_cs[i], C_guesses[i], S_dict_local[now_cs[i]]))
@@ -1173,12 +1177,13 @@ class tsGraph(Graph):
                             calc_dict[self.cov[j,i,t]]= np.sum(np.array([[self[k,i,v]*self.cov[j,k,t-v]
                                                                       for k in now_look]
                                                                      for v in self.lags])) #*r[i]/Cs[i]
-            exp_here = [-k + v for k, v in calc_dict.items()]
             ks = list(calc_dict.keys())
-            if len(exp_here)>0:
-                _check_vars(ks, exp_here)
-                SH = nsolve(exp_here, ks, [0 for i in ks])
-                calc_dict = {k: SH[i] for i, k in enumerate(ks)}
+            if len(ks) > 0:
+                if any([Matrix(list(calc_dict.values())).has(rho) for rho in calc_dict.keys()]):
+                    exp_here = [-k + v for k, v in calc_dict.items()]
+                    _check_vars(ks, exp_here)
+                    SH = nsolve(exp_here, ks, [0 for i in ks])
+                    calc_dict = {k: SH[i] for i, k in enumerate(ks)}
                 for i in c:
                     self.cov[i,:,:] = np.array(Matrix(self.cov[i,:,:]).subs(calc_dict))
                     self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(calc_dict))
