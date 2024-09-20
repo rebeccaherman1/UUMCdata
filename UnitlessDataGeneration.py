@@ -978,8 +978,8 @@ class tsGraph(Graph):
                 return self.topo_order[idx%self.N],idx//self.N
             for idx in range(self.N*self.tau_max, np.prod(X.shape)):
                 i, t = get_loc(idx)
-                s2i = self.s[i] if self.s is not None else 1
-                X[i,t] = (s2i**.5*U[i,t]
+                si = self.s[i] if self.s is not None else 1
+                X[i,t] = (si*U[i,t]
                           + np.sum(np.array([[self[j,i,v]*X[j,t-v]
                                               for v in self.lags]
                                              for j in self.variables])))
@@ -1018,12 +1018,13 @@ class tsGraph(Graph):
     def _remove_cycles(self):
         self[:,:,0] *= (np.tril(self[:,:,0])==0)
     def _make_random(self, p):
+        if self.p_auto is None:
+            self.p_auto=p
+        #if self.init_type=='AR(1)':
+            
         #helper function definitions
         def adjust_p(p, tm):
             return 1 - (1-p)**(1/tm)
-
-        if self.p_auto is None:
-            self.p_auto=p
         super()._make_random(adjust_p(p, self.tau_max+1))
         if self.tau_max>0:
             self.p_auto = adjust_p(self.p_auto, self.tau_max)
@@ -1243,7 +1244,7 @@ class tsGraph(Graph):
         #TODO calculate the 'unneeded' covariances now to make sure result is positive semi-definite
         if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[:,:,0].astype(float))<0):
             raise ConvergenceError("covariance matrix not positive semi-definite")
-        self.s = np.divide(((1-r**2)*Bps)**.5,Cs)
+        self.s = np.abs(np.divide(((1-r**2)*Bps)**.5,Cs))
         self.s[self.s==0]=1
         if (self.s>1).any():
             raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s))
