@@ -127,19 +127,32 @@ def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 5
     plt.xlabel("Number of Parents/Children")
     plt.savefig(fname="HubR2", bbox_inches='tight')
 
-def sortability_compare_triple_types(O = 500, B = 50000):
+def sortability_compare_triple_types(O = 500, B = 50000, tau_max=None):
     adj_types = {}
     adj_types["collider"] =np.array([[0,0,1],[0,0,1],[0,0,0]]); 
     adj_types["chain"] =np.array([[0,1,0],[0,0,1],[0,0,0]]); 
     adj_types["confounder"] =np.array([[0,1,1],[0,0,0],[0,0,0]]); 
+    if tau_max is not None:
+        if tau_max!=1:
+            raise ValueError("this function only supports tau_max=1")
+        auto = np.diag(np.ones((3,)))
+        auto.shape+=(1,)
+        for v in adj_types.values():
+            v.shape+=(1,) 
+        adj_types = {k:np.append(v, auto, axis=2) for k, v in adj_types.items()}
     
     r2dict = {}
     keys = list(adj_types.keys())
 
     for k in keys:
         print("{}s:".format(k))
-        Gs = Graph.gen_dataset(N=3, O=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
-        r2dict[k] = np.array([g.data.R2() for g in Gs])
+        if tau_max is None:
+            Gs = Graph.gen_dataset(N=3, O=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
+            r2dict[k] = np.array([g.data.R2() for g in Gs])
+        else:
+            Gs = tsGraph.gen_dataset(N=3, tau_max=tau_max, T=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
+            r2dict[k] = np.array([g.data.R2(tau_max=tau_max) for g in Gs])
+        
 
     k = r2dict.keys()
     F = plt.figure(figsize=(7,4.5))
@@ -224,8 +237,8 @@ class Graph(object):
         A[i,j] is the effect of X_i on X_j.
         When entries are 0 and 1, this is an adjacency matrix.
         Otherwise, it is a causal coeficients matrix.
-    s2 : np.array of length N
-        Noise variances (if set or calculated)
+    s : np.array of length N
+        Noise standard deviations (if set or calculated)
     topo_order : np.array of length N
         topological order of the variables
     cov : (N x N) np.array
@@ -274,7 +287,7 @@ class Graph(object):
         self.init_type = init_type
         
         #empty initializations for later replacement
-        self.s2 = noise
+        self.s = noise
         self.data = None
         self.cov = None
         self.topo_order = np.arange(self.N)
@@ -377,7 +390,7 @@ class Graph(object):
     def gen_data(self, P):
         '''Generates and returns a dataset with P observations from the current SCM'''
         #calculate noises
-        X = np.random.normal(scale=self.s2.reshape(self.N,1), size=(self.N,P))
+        X = np.random.normal(scale=self.s.reshape(self.N,1), size=(self.N,P))
         #add dependencies
         for i in self.topo_order[1:]:
             X[[i],:]+=np.matmul(self[:,[i]].T,X)
@@ -453,19 +466,18 @@ class Graph(object):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
         self *= np.random.choice(a=[-1,1], size=self.shape)
     def _gen_coefficients_standardized(self):
+        self._initial_draws_A()
         P = self.get_num_parents()
-        A = self._initial_draws_A()
         r = self._initial_draws_r(P)
-        self *= A
         self._rescale_coefficients(r, P)
     def _reset_adjacency_matrix(self):
         self.A = self.A != 0
     def _reset_cov(self):
         self.cov = np.diag(np.ones((self.N,)))
     def _reset_s2(self):
-        self.s2 = np.ones((self.N,))  
+        self.s = np.ones((self.N,))  
     def _initial_draws_A(self):
-        return np.random.normal(size=self.shape) #coefficient draws -- a'
+        self *= np.random.normal(size=self.shape) #coefficient draws -- a'
     def _initial_draws_r(self, P):
         r = np.random.uniform(size=(self.N,)) #starting draws -- r
         with warnings.catch_warnings():
@@ -499,7 +511,7 @@ class Graph(object):
                 loc_cov[it,:] = loc_cov[:,it]
                 
         checks+=[time.time()]
-        self.s2 = np.divide(((1-r**2)*ind_length)**.5,Cs)
+        self.s = np.divide(((1-r**2)*ind_length)**.5,Cs)
         
         checks+=[time.time()]
         self.cov = self._re_sort(loc_cov)
@@ -917,7 +929,7 @@ class tsGraph(Graph):
         If the numerical solver fails to converge, this raises a ConvergenceError. 
         If the potential solution is unstable, this raises an UnstableError. 
         The user may specify how many times the method should attempt this process.
-        Modifies self.A, and sets self.s2, self.cov, and self.style.
+        Modifies self.A, and sets self.s, self.cov, and self.style.
 
         Style = 'unit-variance-noise':
         This method is included for comparison. As is typical of previous data-
@@ -933,14 +945,14 @@ class tsGraph(Graph):
         discarded_psd = 0
         while not stable:
             self._gen_coefficients_cutoffs(discarded_c, discarded_u, discarded_psd, convergence_attempts)
-            #try:
-            super().gen_coefficients(style=style)
-            #except ValueError:
-            #    discarded_c +=1
-            #    continue
-            #except ConvergenceError:
-            #    discarded_psd +=1
-            #    continue
+            try:
+                super().gen_coefficients(style=style)
+            except ValueError:
+                discarded_c +=1
+                continue
+            except ConvergenceError:
+                discarded_psd +=1
+                continue
             stable = self._check_stability()
             if not stable:
                 discarded_u += 1
@@ -951,7 +963,7 @@ class tsGraph(Graph):
     def gen_data(self, T=1000, generation_attempts=2):
         r'''
         Generates time series data from the SCM given by causal coefficients self.A 
-        and noises self.s2. T (an integer) determines the length of the generated
+        and noises self.s. T (an integer) determines the length of the generated
         time series (default = 1000). The resulting TimeSeries object is saved under
         self.data and returned. If the variance of any of the variables in the time
         series is too small (less than .2) or large (more than 2 for 'standardized'
@@ -966,7 +978,7 @@ class tsGraph(Graph):
                 return self.topo_order[idx%self.N],idx//self.N
             for idx in range(self.N*self.tau_max, np.prod(X.shape)):
                 i, t = get_loc(idx)
-                s2i = self.s2[i] if self.s2 is not None else 1
+                s2i = self.s[i] if self.s is not None else 1
                 X[i,t] = (s2i**.5*U[i,t]
                           + np.sum(np.array([[self[j,i,v]*X[j,t-v]
                                               for v in self.lags]
@@ -1047,23 +1059,14 @@ class tsGraph(Graph):
         else:
             self.cov = None
     def _initial_draws_A(self):
-        A = np.zeros((self.shape))
-        lags_per_process = self.sum(axis='time')#relying on the fact that the adjacency matrix has already been reset
+        super()._initial_draws_A()
+        Bp_init = self.get_adjacencies().astype(float)
+        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
+        B = self.sum(axis='time')
         for i in self.variables:
             for j in self.variables:
-                if lags_per_process[i,j]!=0:
-                    A[i,j] = np.random.normal(size=(1,1,self.get_num_lags()), scale=1.0/lags_per_process[i,j])
-        return A
-        #    def _initial_draws(self, P):
-#        A, r = super()._initial_draws(P)
-#        Bp_init = self.get_adjacencies().astype(float)
-#        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
-#        B = self.sum(matrix=A, axis='time')
-#        for i in self.variables:
-#            for j in self.variables:
-#                if B[i,j]!=0:
-#                    A[i,j]*=Bp[i,j]/B[i,j]
-#        return A, r
+                if B[i,j]!=0:
+                    self[i,j]*=Bp[i,j]/B[i,j] #A[i,j] = np.random.normal(size=(1,1,self.get_num_lags()), scale=1.0/lags_per_process[i,j])
     def _convolve_squared(self, A=None, C=None):
         result = 0
         if A is None:
@@ -1082,9 +1085,9 @@ class tsGraph(Graph):
                         M[i,j,t]=0
         return M.astype(float)
     def _calc_C_guess(self, r, P, i, it):
-        norm = self.sum(matrix=self[:,[i],:]**2, axis=('source', 'time'))
-        Ap = self.select_vars(self.topo_order[:(it+1)])[:it,[it]]
-        loc_cov = self._remove_vars(self.select_vars(self.topo_order[:it], A=self.cov))
+        norm = self.sum(matrix=self.sum(axis='time')[:,[i]]**2, axis='source')
+        Ap = self.select_vars(self.topo_order[:(it+1)])[:,[it]]
+        loc_cov = self._remove_vars(self.select_vars(self.topo_order[:(it+1)], A=self.cov))
         matmulres = self._convolve_squared(Ap, loc_cov)
         return np.real(((r**2*matmulres + (1-r**2)*norm)**.5)[0,0])
     def _rescale_coefficients(self, r, P):
@@ -1096,7 +1099,7 @@ class tsGraph(Graph):
                     + r[i]/Cs[i]*sum([self[k,i,v]*self.cov[j,k,t-v] 
                                       for k in self.variables 
                                       for v in self.lags]))
-        Bps = self.sum(matrix=self**2, axis=('time', 'source'))
+        Bps = self.sum(matrix=self.sum(axis=('time'))**2, axis='source')
         #Bp = self.sum(axis='time')
         #Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
         #Bps[Bps==0]=1
@@ -1142,8 +1145,8 @@ class tsGraph(Graph):
                           for j in self.variables
                           for k in self.variables
                           for t in self.lags
-                          for v in self.lags]) 
-                    + (1-r[i]**2)*Bps[i] for i in c]
+                          for v in self.lags if k!=j]) 
+                    + Bps[i] for i in c]
             
             checks[-1]+=[time.time()]
             s_exp += [make_sigma_expression(0,j,i) 
@@ -1236,16 +1239,14 @@ class tsGraph(Graph):
             checks[-1]+=[time.time()]
 
         _check_vars([], Matrix(np.sum(self.cov, axis=2)))
-        self.cov[:,self.topo_order[-1],self.tau_max]=0
-        self.cov[self.topo_order[-1],:,-self.tau_max]=self.cov[:,self.topo_order[-1],self.tau_max].T
 
         #TODO calculate the 'unneeded' covariances now to make sure result is positive semi-definite
         if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[:,:,0].astype(float))<0):
             raise ConvergenceError("covariance matrix not positive semi-definite")
-        self.s2 = np.array([(1-r[i]**2)/Cs[i]**2*Bps[i] for i in self.variables])
-        self.s2[self.s2==0]=1
-        if (self.s2>1).any():
-            raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s2))
+        self.s = np.divide(((1-r**2)*Bps)**.5,Cs)
+        self.s[self.s==0]=1
+        if (self.s>1).any():
+            raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s))
         checks=np.array(checks)
         checks=np.mean(checks[:,1:]-checks[:,:-1], axis=0)
         #print(("Elapsed time for... C expression construction={:.2f}, RHO expression construction={:.2f}, between={:.2f}, additional construction={:.2f}, additional solve={:.2f} (solve: {:.2f}. update: {:.2f})").format(*checks, np.mean(np.array(solve_time)), np.mean(np.array(update_time))))
