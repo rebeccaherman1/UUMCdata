@@ -88,7 +88,7 @@ def _check_vars(now_vars, s_exp):
 #user-available helper function
 def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
-    return M & ~np.diag(np.diag(M))
+    return M * (np.diag(np.diag(M))==0)
 
 class DataSet(list):
     def __repr__(self):
@@ -326,7 +326,7 @@ class Graph(object):
         return DataSet(Gs)
 
     #User-available retrieval functions
-    def get_adjacencies(self):
+    def get_adjacencies(self, **args):
         '''returns an NxN boolean matrix where A[i,j]=True if X_i --> X_j'''
         return self.A != 0
     def order(self, i):
@@ -340,10 +340,10 @@ class Graph(object):
         r'''Returns an N x N matrix summarizing ancestries in the summary graph.
         The i,j-th is True if X_i is an ancestor of X_j and False otherwise.
         '''
-        E = self.get_adjacencies()
+        E = self.get_adjacencies(include_auto=True)
         Ek = E.copy()
         all_paths = Ek.copy()*False
-        for path_len in range(self.N - 1):
+        for path_len in range(self.N):
             all_paths = all_paths | Ek
             Ek = Ek.dot(E)
         return all_paths
@@ -466,9 +466,9 @@ class Graph(object):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
         self *= np.random.choice(a=[-1,1], size=self.shape)
     def _gen_coefficients_standardized(self):
-        self._initial_draws_A()
         P = self.get_num_parents()
         r = self._initial_draws_r(P)
+        self._initial_draws_A(r)
         self._rescale_coefficients(r, P)
     def _reset_adjacency_matrix(self):
         self.A = self.A != 0
@@ -476,7 +476,7 @@ class Graph(object):
         self.cov = np.diag(np.ones((self.N,)))
     def _reset_s2(self):
         self.s = np.ones((self.N,))  
-    def _initial_draws_A(self):
+    def _initial_draws_A(self, **args):
         self *= np.random.normal(size=self.shape) #coefficient draws -- a'
     def _initial_draws_r(self, P):
         r = np.random.uniform(size=(self.N,)) #starting draws -- r
@@ -682,7 +682,7 @@ class Graph(object):
             ax.add_artist(arrow)
 
             
-        S = self.get_adjacencies()
+        S = self.get_adjacencies(include_auto=True)
         summary_edges = np.sum(S)
         DAG_width = 3
         N_CUTOFF = 8
@@ -865,11 +865,14 @@ class tsGraph(Graph):
     #order, get_num_parents, ancestry, select_vars
     def get_num_lags(self):
         return len(self.lags)
-    def get_adjacencies(self):
+    def get_adjacencies(self, include_auto=False):
         r'''Returns an N x N summary-graph adjacency matrix.
         The i,j-th entry represents an effect of X_i on X_j.
         '''
-        return self.any(axis='time')
+        adj = self.any(axis='time')
+        if not include_auto:
+            adj = remove_diagonal(adj)
+        return adj
     def cycle_ancestry(self):
         anc = self.ancestry()
         cycles = np.triu(remove_diagonal(anc*anc.T))
@@ -879,7 +882,7 @@ class tsGraph(Graph):
         for i in idn:
             if id_used[i]:
                 continue
-            c1 = np.insert(idn[cycles[i,:]],0,i)
+            c1 = np.insert(idn[cycles[i,:]==True],0,i)
             collected_cycles+=[c1]
             id_used = np.array([any([j in c for c in collected_cycles])
                                 for j in idn]).squeeze()
@@ -945,14 +948,14 @@ class tsGraph(Graph):
         discarded_psd = 0
         while not stable:
             self._gen_coefficients_cutoffs(discarded_c, discarded_u, discarded_psd, convergence_attempts)
-            try:
-                super().gen_coefficients(style=style)
-            except ValueError:
-                discarded_c +=1
-                continue
-            except ConvergenceError:
-                discarded_psd +=1
-                continue
+            #try:
+            super().gen_coefficients(style=style)
+            #except ValueError:
+            #    discarded_c +=1
+            #    continue
+            #except ConvergenceError:
+            #    discarded_psd +=1
+            #    continue
             stable = self._check_stability()
             if not stable:
                 discarded_u += 1
@@ -1059,14 +1062,20 @@ class tsGraph(Graph):
             self.cov = RHOs
         else:
             self.cov = None
-    def _initial_draws_A(self):
+    def _initial_draws_A(self, r):
         super()._initial_draws_A()
         Bp_init = self.get_adjacencies().astype(float)
-        Bp=Bp_init*np.random.normal(size=Bp_init.shape)
+        Bp=Bp_init*np.abs(np.random.normal(size=Bp_init.shape))
+        f = np.random.f(1,1,size=(self.N,))
+        r.shape=(1,self.N)
+        Bp = Bp*r*(1-(np.sqrt(2)/2)**f)**.5+np.diag((np.sqrt(2)/2)**f)
+        r.shape=(self.N,)
         B = self.sum(axis='time')
         for i in self.variables:
             for j in self.variables:
                 if B[i,j]!=0:
+                    #if Bp[i,j]==0.0:
+                        #raise ConvergenceError("Bad initial draws")
                     self[i,j]*=Bp[i,j]/B[i,j] #A[i,j] = np.random.normal(size=(1,1,self.get_num_lags()), scale=1.0/lags_per_process[i,j])
     def _convolve_squared(self, A=None, C=None):
         result = 0
@@ -1086,21 +1095,33 @@ class tsGraph(Graph):
                         M[i,j,t]=0
         return M.astype(float)
     def _calc_C_guess(self, r, P, i, it):
-        norm = self.sum(matrix=self.sum(axis='time')[:,[i]]**2, axis='source')
+        Bp_auto = np.diag(self.sum(axis='time'))[i]**2
+        norm = self.sum(matrix=remove_diagonal(self.sum(axis='time'))[:,[i]]**2, axis='source')
+        if norm==0:
+            norm=1.0-Bp_auto
+        else:
+            norm=norm*(1-r**2)/(r**2)
         Ap = self.select_vars(self.topo_order[:(it+1)])[:,[it]]
         loc_cov = self._remove_vars(self.select_vars(self.topo_order[:(it+1)], A=self.cov))
         matmulres = self._convolve_squared(Ap, loc_cov)
-        return np.real(((r**2*matmulres + (1-r**2)*norm)**.5)[0,0])
+        return np.real(((matmulres + norm)**.5)[0,0])
     def _rescale_coefficients(self, r, P):
         #construct symbols
+        Bps = self.sum(matrix=remove_diagonal(self.sum(axis=('time')))**2, axis='source')
+        Bps_auto = np.diag(self.sum(axis=('time')))**2
+        r.shape=(self.N,)
+        print("r:{}".format(r))
+        multiplier_ = np.array([(1-ri**2)/(ri**2) if ri!=0 else 1.0 for ri in r])
+        Bps = Bps.astype(float)
+        Bps[Bps==0]=1.0-Bps_auto[Bps==0]
         Cs = np.array(symbols(["C"+str(i) for i in self.variables]))
-        Cs[P==0]=1
+        Cs[(P==0) * (Bps_auto==0)]=1.0
         def make_sigma_expression(t,j,i):
             return (-self.cov[j,i,t] 
-                    + r[i]/Cs[i]*sum([self[k,i,v]*self.cov[j,k,t-v] 
+                    + 1.0/Cs[i]*sum([self[k,i,v]*self.cov[j,k,t-v] 
                                       for k in self.variables 
                                       for v in self.lags]))
-        Bps = self.sum(matrix=self.sum(axis=('time'))**2, axis='source')
+
         #Bp = self.sum(axis='time')
         #Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
         #Bps[Bps==0]=1
@@ -1141,13 +1162,15 @@ class tsGraph(Graph):
             #SLOW (.02s/iteration)
             checks+=[[time.time()]]
             s_exp = [-Cs[i]**2 
-                     + r[i]**2*
-                     sum([self[j,i,t]*self[k,i,v]*self.cov[j,k,t-v]
-                          for j in self.variables
-                          for k in self.variables
-                          for t in self.lags
-                          for v in self.lags if k!=j]) 
-                    + Bps[i] for i in c]
+                     + sum([self[j,i,t]*self[k,i,v]*self.cov[j,k,t-v]
+                            for j in self.variables
+                            for k in self.variables
+                            for t in self.lags
+                            for v in self.lags]) 
+                     + Bps[i]*multiplier_[i] for i in c]
+            print(r)
+            print(multiplier_)
+            print(s_exp)
             
             checks[-1]+=[time.time()]
             s_exp += [make_sigma_expression(0,j,i) 
@@ -1193,7 +1216,7 @@ class tsGraph(Graph):
                 #update
                 for i in c:
                     Cs[i] = Cs[i].subs(S_dict_local)
-                    self[:,i] = self[:,i]*r[i]/Cs[i]
+                    self[:,i] = self[:,i]/Cs[i]
                     self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(S_dict_local))
                     self.cov[i,:,:] = np.array(Matrix(self.cov[i,:,:]).subs(S_dict_local))
             
@@ -1244,7 +1267,8 @@ class tsGraph(Graph):
         #TODO calculate the 'unneeded' covariances now to make sure result is positive semi-definite
         if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[:,:,0].astype(float))<0):
             raise ConvergenceError("covariance matrix not positive semi-definite")
-        self.s = np.abs(np.divide(((1-r**2)*Bps)**.5,Cs))
+
+        self.s = np.abs(np.divide((multiplier_*Bps)**.5,Cs))
         self.s[self.s==0]=1
         if (self.s>1).any():
             raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s))
