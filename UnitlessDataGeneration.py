@@ -37,9 +37,9 @@ class SortabilityPlotting():
         bp1['boxes'][0].set_label(label)
     @classmethod
     def plot_stat_dist(cls, r2s, title):
+        plt.xlim([0,1])
         for i in range(r2s.shape[1]):
             _ = plt.hist(r2s[:,i], density=True, cumulative=False, bins=20, alpha=.5, label=str(i))
-        plt.xlim([0,1])
         plt.legend(title="Node", fontsize='small')
         plt.title(title)
         plt.xlabel("R2 score")
@@ -335,7 +335,7 @@ class Graph(object):
     def get_num_parents(self):
         '''Returns an np.array of length N containing the number of parent processes 
         of each variable (in the summary graph)'''
-        return self.sum(matrix=self.get_adjacencies(), axis='source')
+        return self.sum(matrix=self.get_adjacencies(include_auto=True), axis='source')
     def ancestry(self):
         r'''Returns an N x N matrix summarizing ancestries in the summary graph.
         The i,j-th is True if X_i is an ancestor of X_j and False otherwise.
@@ -476,7 +476,7 @@ class Graph(object):
         self.cov = np.diag(np.ones((self.N,)))
     def _reset_s2(self):
         self.s = np.ones((self.N,))  
-    def _initial_draws_A(self, **args):
+    def _initial_draws_A(self, *args):
         self *= np.random.normal(size=self.shape) #coefficient draws -- a'
     def _initial_draws_r(self, P):
         r = np.random.uniform(size=(self.N,)) #starting draws -- r
@@ -492,6 +492,7 @@ class Graph(object):
         #Need to go through by topological order!
         checks=[time.time()]
         ind_length = (self**2).sum(axis='source') #constant when parents are independent
+        r[ind_length==0]=0
         ind_length[ind_length==0]=1
         
         loc_cov = deepcopy(self.select_vars(self.topo_order, A=self.cov))
@@ -865,7 +866,7 @@ class tsGraph(Graph):
     #order, get_num_parents, ancestry, select_vars
     def get_num_lags(self):
         return len(self.lags)
-    def get_adjacencies(self, include_auto=False):
+    def get_adjacencies(self, include_auto=True):
         r'''Returns an N x N summary-graph adjacency matrix.
         The i,j-th entry represents an effect of X_i on X_j.
         '''
@@ -948,14 +949,14 @@ class tsGraph(Graph):
         discarded_psd = 0
         while not stable:
             self._gen_coefficients_cutoffs(discarded_c, discarded_u, discarded_psd, convergence_attempts)
-            #try:
-            super().gen_coefficients(style=style)
-            #except ValueError:
-            #    discarded_c +=1
-            #    continue
-            #except ConvergenceError:
-            #    discarded_psd +=1
-            #    continue
+            try:
+                super().gen_coefficients(style=style)
+            except ValueError:
+                discarded_c +=1
+                continue
+            except ConvergenceError:
+                discarded_psd +=1
+                continue
             stable = self._check_stability()
             if not stable:
                 discarded_u += 1
@@ -1062,21 +1063,25 @@ class tsGraph(Graph):
             self.cov = RHOs
         else:
             self.cov = None
-    def _initial_draws_A(self, r):
+    def _initial_draws_A(self, *args):
         super()._initial_draws_A()
         Bp_init = self.get_adjacencies().astype(float)
         Bp=Bp_init*np.abs(np.random.normal(size=Bp_init.shape))
-        f = np.random.f(1,1,size=(self.N,))
-        r.shape=(1,self.N)
-        Bp = Bp*r*(1-(np.sqrt(2)/2)**f)**.5+np.diag((np.sqrt(2)/2)**f)
-        r.shape=(self.N,)
-        B = self.sum(axis='time')
+        #f = np.sqrt(np.random.f(1,1,size=(self.N,)))
+        #r.shape=(1,self.N)
+        #Bp = Bp*r*(1-(np.sqrt(2)/2)**f)**.5+np.diag((np.sqrt(2)/2)**f)
+        #r.shape=(self.N,)
+        B = np.abs(self.sum(axis='time'))
         for i in self.variables:
             for j in self.variables:
                 if B[i,j]!=0:
                     #if Bp[i,j]==0.0:
                         #raise ConvergenceError("Bad initial draws")
-                    self[i,j]*=Bp[i,j]/B[i,j] #A[i,j] = np.random.normal(size=(1,1,self.get_num_lags()), scale=1.0/lags_per_process[i,j])
+                    self[i,j]*=Bp[i,j]/B[i,j] 
+    def _initial_draws_r(self, P):
+        Pp = self.sum(matrix=self.get_adjacencies(include_auto=False), axis='source')
+        P[(P>1)*(Pp>0)] -= 1
+        return super()._initial_draws_r(P)
     def _convolve_squared(self, A=None, C=None):
         result = 0
         if A is None:
@@ -1095,36 +1100,36 @@ class tsGraph(Graph):
                         M[i,j,t]=0
         return M.astype(float)
     def _calc_C_guess(self, r, P, i, it):
-        Bp_auto = np.diag(self.sum(axis='time'))[i]**2
-        norm = self.sum(matrix=remove_diagonal(self.sum(axis='time'))[:,[i]]**2, axis='source')
-        if norm==0:
-            norm=1.0-Bp_auto
-        else:
-            norm=norm*(1-r**2)/(r**2)
+        #Bp_auto = np.diag(self.sum(axis='time'))[i]**2
+        #norm = self.sum(matrix=remove_diagonal(self.sum(axis='time'))[:,[i]]**2, axis='source')
+        norm = self.sum(matrix=self.sum(axis='time')[:,[i]]**2, axis='source')
+        #if norm==0:
+        #    norm=1.0-Bp_auto
+        #else:
+        #    norm=norm*(1-r**2)/(r**2)
         Ap = self.select_vars(self.topo_order[:(it+1)])[:,[it]]
         loc_cov = self._remove_vars(self.select_vars(self.topo_order[:(it+1)], A=self.cov))
         matmulres = self._convolve_squared(Ap, loc_cov)
-        return np.real(((matmulres + norm)**.5)[0,0])
+        if matmulres<0 or norm<0:
+            print("matmulres={}, norm={}".format(matmulres, norm))
+        return np.real(((r**2*matmulres + (1-r**2)*norm)**.5)[0,0])
     def _rescale_coefficients(self, r, P):
         #construct symbols
-        Bps = self.sum(matrix=remove_diagonal(self.sum(axis=('time')))**2, axis='source')
-        Bps_auto = np.diag(self.sum(axis=('time')))**2
+        #Bps = self.sum(matrix=remove_diagonal(self.sum(axis=('time')))**2, axis='source')
+        Bps = self.sum(matrix=self.sum(axis=('time'))**2, axis='source')
+        #Bps_auto = np.diag(self.sum(axis=('time')))**2
         r.shape=(self.N,)
-        print("r:{}".format(r))
-        multiplier_ = np.array([(1-ri**2)/(ri**2) if ri!=0 else 1.0 for ri in r])
+        #multiplier_ = np.array([(1-ri**2)/(ri**2) if ri!=0 else 1.0 for ri in r])
         Bps = Bps.astype(float)
-        Bps[Bps==0]=1.0-Bps_auto[Bps==0]
+        r[Bps==0]=0.0
+        Bps[Bps==0]=1.0#-Bps_auto[Bps==0]
         Cs = np.array(symbols(["C"+str(i) for i in self.variables]))
-        Cs[(P==0) * (Bps_auto==0)]=1.0
+        Cs[(P==0)]=1.0 # * (Bps_auto==0)
         def make_sigma_expression(t,j,i):
             return (-self.cov[j,i,t] 
-                    + 1.0/Cs[i]*sum([self[k,i,v]*self.cov[j,k,t-v] 
+                    + r[i]/Cs[i]*sum([self[k,i,v]*self.cov[j,k,t-v] 
                                       for k in self.variables 
                                       for v in self.lags]))
-
-        #Bp = self.sum(axis='time')
-        #Bps = np.array([np.sum(Bp[:,i]**2) for i in self.variables])
-        #Bps[Bps==0]=1
         checks = []
         solve_time = []
         update_time = []
@@ -1162,15 +1167,12 @@ class tsGraph(Graph):
             #SLOW (.02s/iteration)
             checks+=[[time.time()]]
             s_exp = [-Cs[i]**2 
-                     + sum([self[j,i,t]*self[k,i,v]*self.cov[j,k,t-v]
+                     + r[i]**2*sum([self[j,i,t]*self[k,i,v]*self.cov[j,k,t-v]
                             for j in self.variables
                             for k in self.variables
                             for t in self.lags
-                            for v in self.lags]) 
-                     + Bps[i]*multiplier_[i] for i in c]
-            print(r)
-            print(multiplier_)
-            print(s_exp)
+                            for v in self.lags if k!=j]) 
+                     + Bps[i] for i in c] #*multiplier_[i]
             
             checks[-1]+=[time.time()]
             s_exp += [make_sigma_expression(0,j,i) 
@@ -1216,7 +1218,7 @@ class tsGraph(Graph):
                 #update
                 for i in c:
                     Cs[i] = Cs[i].subs(S_dict_local)
-                    self[:,i] = self[:,i]/Cs[i]
+                    self[:,i] = self[:,i]*r[i]/Cs[i]
                     self.cov[:,i,:] = np.array(Matrix(self.cov[:,i,:]).subs(S_dict_local))
                     self.cov[i,:,:] = np.array(Matrix(self.cov[i,:,:]).subs(S_dict_local))
             
@@ -1264,14 +1266,14 @@ class tsGraph(Graph):
 
         _check_vars([], Matrix(np.sum(self.cov, axis=2)))
 
-        #TODO calculate the 'unneeded' covariances now to make sure result is positive semi-definite
         if self.tau_max!=0 and np.any(np.linalg.eigvals(self.cov[:,:,0].astype(float))<0):
             raise ConvergenceError("covariance matrix not positive semi-definite")
-
-        self.s = np.abs(np.divide((multiplier_*Bps)**.5,Cs))
-        self.s[self.s==0]=1
+        self.s = np.divide(((1-r**2)*Bps)**.5,Cs)#multiplier_
         if (self.s>1).any():
             raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, Bps={}, s2={}".format(r, Cs, Bps, self.s))
+        self.cov = self.cov.astype(float)
+        if (np.abs(self.cov)>1).any():
+            raise ConvergenceError("Converged RHOs are sometimes > 1! {}".format(self.cov))
         checks=np.array(checks)
         checks=np.mean(checks[:,1:]-checks[:,:-1], axis=0)
         #print(("Elapsed time for... C expression construction={:.2f}, RHO expression construction={:.2f}, between={:.2f}, additional construction={:.2f}, additional solve={:.2f} (solve: {:.2f}. update: {:.2f})").format(*checks, np.mean(np.array(solve_time)), np.mean(np.array(update_time))))
@@ -1386,7 +1388,11 @@ class Data(object):
             X_i = self._remove_regressors(X, i)
             Xi = X[i,:]
             _, resid, _, _ = np.linalg.lstsq(X_i.T, Xi.T,rcond=None)
-            R2s[i] = 1 - resid[0]/self.P/np.var(Xi)
+            norm = np.var(Xi, dtype=np.float32)*float(Xi.shape[0])
+            if resid[0]>norm:
+                R2s[i]=0
+            else:
+                R2s[i] = 1.0 - resid[0]/norm
         return R2s
 
 class TimeSeries(Data):
@@ -1418,7 +1424,7 @@ class TimeSeries(Data):
     def _get_regressors(self):
         X = self[:,self.tau_max:]
         for tau in range(1, self.tau_max+1):
-            X = np.append(X, self[:,self.tau_max-tau:-tau], axis=TimeSeries.AXIS_LABELS['variables'])
+            X = np.append(X, self[:,(self.tau_max-tau):-tau], axis=TimeSeries.AXIS_LABELS['variables'])
         return X
 
     def _remove_regressors(self, X, i):
