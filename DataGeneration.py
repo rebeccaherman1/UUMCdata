@@ -573,6 +573,8 @@ class Graph(object):
     def __ipow__(self, other):
         return self._i_pass_on(lambda x,y : x**y, other)
 
+    def _ij_style(self,i,j):
+        return "arc3"
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
         #helper function definitions
@@ -630,7 +632,7 @@ class Graph(object):
             posA=artists[i].center
             posB=artists[j].center
             if i<j:
-                connectionstyle="arc3"#,rad=.5" #TODO BRING BACK FOR TS GRAPHS WHICH CAN BE CYCLIC
+                connectionstyle=self._ij_style(i,j)
             elif i==j:
                 connectionstyle="arc3,rad=2"
                 posA = artists[i].get_corners()[0]
@@ -1345,3 +1347,6 @@ class tsGraph(Graph):
             and self.tau_max==G.tau_max 
             and super().__eq__(self, G)
         )
+
+    def _ij_style(self, i,j):
+        return "arc3,rad={}".format(((j-i)%round(self.N/2))/self.N)
