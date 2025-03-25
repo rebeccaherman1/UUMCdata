@@ -6,22 +6,26 @@
 import numpy as np
 from sympy import Matrix, Symbol, symbols, re, im, Abs, Float
 from sympy.solvers import solve, nsolve
+from ChecksErrors import *
 
-import sys
 import io
-import signal
-from contextlib import redirect_stdout, contextmanager
+from contextlib import redirect_stdout
 import warnings
 from copy import deepcopy
+import time
 
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
 import re
 import scipy.stats
-import time
 
-from causallearn.graph.GraphClass import *
+from causallearn.graph.GraphClass import CausalGraph
 from dao import corr
+
+#user-available helper function
+def remove_diagonal(M):
+    '''removes the diagonal from a 2D array M'''
+    return M * (np.diag(np.diag(M))==0)
 
 class SortabilityPlotting():
     @classmethod
@@ -52,52 +56,6 @@ class SortabilityPlotting():
         plt.legend(title="Node", fontsize='small')
         plt.title(title)
         plt.xlabel("R2 score")
-
-#Checks, warnings, and errors
-class UnstableError(Exception): pass
-class ConvergenceError(Exception): pass
-class GenerationError(Exception): pass
-class TimeoutException(Exception): pass
-class OptionError(Exception): pass
-@contextmanager
-def _time_lim(seconds):
-    def signal_handler(signum, frame):
-        raise TimeoutException("Timed out!")
-    signal.signal(signal.SIGALRM, signal_handler)
-    signal.alarm(seconds)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-def _check_given(name, value):
-    '''Checks that an optional input is specified'''
-    if value is None:
-        raise OptionError("Please specify {}".format(name))
-def _check_option(name, options, chosen):
-    '''checks that a valid keyword is chosen'''
-    if chosen not in options:
-        raise OptionError("Valid choices for {} include {}".format(name, options))
-def _progress_message(msg):
-    '''Progress update that modifies in place'''
-    sys.stdout.write('\r')
-    sys.stdout.write(msg)
-    sys.stdout.flush()
-def _clear_progress_message(new_message=None):
-    sys.stdout.write('\r')
-    if new_message is None:
-        print('                                                                     ')
-    else:
-        print(new_message)
-def _check_vars(now_vars, s_exp):
-    missing_vars = [v for v in Matrix(s_exp).free_symbols if not Matrix(now_vars).has(v)]
-    if len(missing_vars)>0:
-        print("MISSING VARIABLES! {}".format(missing_vars))
-    return len(missing_vars)==0
-
-#user-available helper function
-def remove_diagonal(M):
-    '''removes the diagonal from a 2D array M'''
-    return M * (np.diag(np.diag(M))==0)
 
 class DataSet(list):
     '''List of independently-generated datasets. Avoids printing many datasets.'''
@@ -1423,6 +1381,7 @@ class tsGraph(Graph):
             and super().__eq__(self, G)
         )
 
+#TODO make better __repr__ for iid data!
 class Data(object):
     AXIS_LABELS = {'variables': 0, 'observations': 1}
     analysis_options = ['var', 'R2']
