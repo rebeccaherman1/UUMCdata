@@ -127,7 +127,7 @@ class Graph(object):
     topo_order : np.array of length N
         topological order of the variables
     cov : (N x N) np.array
-        Theoretical covariance matrix (if coeficients are generated).
+        Theoretical covariance matrix (if coefficients are generated).
         cov[i,j] is the covariance of X_i and X_j.
     data : Data object
         data generated from this SCM (if generated)
@@ -160,8 +160,9 @@ class Graph(object):
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
     G == G' : G.A == G'.A
     abs(G) : returns a new Graph with G'.A = abs(G.A)
-    +, -, *, /, ** : If given 2 GRAPHS, returns a new GRAPH. 
-                     If given a GRAPH and a float, modifies the graph in place.
+    the following functions may take 2 GRAPHs or a GRAPH and a float.
+    +, -, *, /, ** : Returns a new GRAPH. 
+    +=, -=, *=, /=, **= : Modifies the GRAPH in place.
     NUMPY FUNCTIONS 
     sum, any, inv : takes a GRAPH and returns an array or value
     triu : returns a new GRAPH
@@ -342,43 +343,59 @@ class Graph(object):
         self._reset_cov()
         self._reset_s2()
         if self.style=='UUMC':
-            self._gen_coefficients_standardized()
+            self._gen_coefficients_standardized() #sets cov and s
         elif self.style=='IPA':
             self._gen_coefficients_UVN(low=0.5, high=1.5)
             for i in self.topo_order[1:]:
                 norm=np.sqrt(np.sum(self[:,i]**2)+1)
                 self[:,i]/=norm
-                self.s[i]/=norm
-        elif self.style=='50-50':
+                self.s[i]/=norm                    #set s but not cov
+        elif self.style=='50-50':                  #set neither
             self._gen_coefficients_UVN(low=0.25, high=1)
-        elif self.style=='DaO':
+        elif self.style=='DaO':                    #sets cov and s
             self.cov, B, self.s = corr(self.A.T)
             self.A = B.T
         else:
-            self._gen_coefficients_UVN()
-        return self
+            self._gen_coefficients_UVN()           #sets neither
+        return self        
     def gen_data(self, P):
         '''Generates and returns a dataset with P observations from the current SCM'''
+        
         #calculate noises
         par = self.get_num_parents()
         X = np.random.normal(scale=self.s.reshape(self.N,1), size=(self.N,P))
-        #add dependencies
+
+        #data generation rescaling of coefficients
+        def rescale_iSCM(i):
+            #scale so the total variance is 1
+            sample_std = np.std(X[i,:])
+            self[:,i]/=sample_std
+            self.s[i]/=sample_std
+            X[i,:]/=sample_std
+        def rescale_50(i):
+            #scale so half the variance is noise
+            X[i,:]/=np.sqrt(2)
+            sample_std = np.sqrt(2)*np.std(to_add)
+            self[:,i]/=sample_std
+            to_add/=sample_std            
+            
         if self.style=='iSCM':
-            i0 = self.topo_order[0]
-            X[i0,:]/=np.std(X[i0,:])
+            rescale_iSCM(self.topo_order[0])
+
+        #add causal variability
         for i in self.topo_order[1:]:
+            #calculate causal variability
             to_add=np.matmul(self[:,[i]].T,X)
+            
             if self.style=='50-50' and par[i] != 0:
-                X[i,:]/=np.sqrt(2)
-                sample_std = np.sqrt(2)*np.std(to_add)
-                self[:,i]/=sample_std
-                to_add/=sample_std
+                rescale_50(i)
+
+            #complete data
             X[[i],:]+=to_add
+            
             if self.style=='iSCM':
-                sample_std = np.std(X[i,:])
-                self[:,i]/=sample_std
-                self.s[i]/=sample_std
-                X[i,:]/=sample_std
+                rescale_iSCM(i)
+        
         self.data = Data(self.N, P, self.labels, X)
         return self.data
     def deduce_topo_order(self):
@@ -466,7 +483,7 @@ class Graph(object):
         self._P = self.get_num_parents()
         self._r = self._initial_draws_r()
         self._initial_draws_A()
-        self._rescale_coefficients()
+        self._rescale_coefficients() #sets s and cov
     def _reset_adjacency_matrix(self):
         self.A = self.A != 0
     def _reset_cov(self):
@@ -768,8 +785,9 @@ class tsGraph(Graph):
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
     G == G' : G.A == G'.A
     abs(G) : returns a new Graph with G'.A = abs(G.A)
-    +, -, *, /, ** : If given 2 GRAPHS, returns a new GRAPH. 
-                     If given a GRAPH and a float, modifies the graph in place.
+    the following functions may take 2 GRAPHs or a GRAPH and a float.
+    +, -, *, /, ** : Returns a new GRAPH. 
+    +=, -=, *=, /=, **= : Modifies the GRAPH in place.
     NUMPY FUNCTIONS 
     sum, any, inv : takes a GRAPH and returns an array or value
     triu : returns a new GRAPH
