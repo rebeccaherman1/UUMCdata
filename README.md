@@ -16,6 +16,6 @@ To generate random data:
    * randomly using Erdös-Rényi sampling
    * from a user-provided array where $a_{ji}=1 \Leftrightarrow X_j \rightarrow X_i$. For time series, $a_{ji\tau}=1 \Leftrightarrow X_j(t-\tau)\rightarrow X_i(t)$.
 2. Call `gen_coefficients()` on the graph using the options from the table above. This sets the coefficient matrix `A` and the noise vector `s`.
-3. Call `gen_data()` on the graph, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](Data.py)) which is also stored in the `data` attribute of the `Graph`.
+3. Call `gen_data()` on the graph, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](Data.py)) which is also stored in the `data` attribute of the graph.
 
-[Var-](https://doi.org/10.48550/arXiv.2102.13647) and [R2-](https://proceedings.neurips.cc/paper_files/paper/2023/file/027e86facfe7c1ea52ca1fca7bc1402b-Paper-Conference.pdf)sortability can be examined by calling `sortability` on the `Graph`. Large datasets over multiple SCMs can be generated using `Graph.gen_dataset()`, and [AnalysisPlotting.py](AnalysisPlotting.py) and [UUMC.ipynb](UUMC.ipynb) contain code that can be used to re-create figures from the UUMC paper.
+[Var-](https://doi.org/10.48550/arXiv.2102.13647) and [R2-](https://proceedings.neurips.cc/paper_files/paper/2023/file/027e86facfe7c1ea52ca1fca7bc1402b-Paper-Conference.pdf)sortability can be examined by calling `sortability` on the graph. Large datasets over multiple SCMs can be generated using `Graph.gen_dataset()`, and [AnalysisPlotting.py](AnalysisPlotting.py) and [UUMC.ipynb](UUMC.ipynb) contain code that can be used to re-create figures from the UUMC paper.
