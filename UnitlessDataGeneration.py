@@ -355,21 +355,22 @@ class Graph(object):
         self._reset_s2()
         if self.style=='UUMC':
             self._gen_coefficients_standardized(r_args = gen_args)
-        elif self.style=='IPA': #cov not set
+        elif self.style=='IPA':
             self._gen_coefficients_UVN(low=0.5, high=1.5)
             for i in self.topo_order[1:]:
                 norm=np.sqrt(np.sum(self[:,i]**2)+1)
                 self[:,i]/=norm
-                self.s[i]/=norm                    
-        elif self.style=='50-50': #cov not set, s modified later
+                self.s[i]/=norm
+                self.cov = self._calc_cov()
+        elif self.style=='50-50': #SCM modified during GEN_DATA
             self._gen_coefficients_UVN(low=0.25, high=1)
         elif self.style=='DaO': 
             self.cov, B, self.s = corr(self.A.T)
             self.A = B.T
-        elif self.style=='iSCM': #cov not set, s modified later
+        elif self.style=='iSCM': #SCM modified during GEN_DATA
             self._gen_coefficients_UVN()
         else: #UVN
-            self._gen_coefficients_UVN(**gen_args) #cov not set
+            self._gen_coefficients_UVN(**gen_args)
         return self        
     def gen_data(self, P):
         '''Generates and returns a dataset with P observations from the current SCM'''
@@ -410,6 +411,8 @@ class Graph(object):
                 rescale_iSCM(i)
         
         self.data = Data(self.N, P, self.labels, X)
+        if self.style in ['50-50', 'iSCM']:
+            self._calc_cov()
         return self.data
     def deduce_topo_order(self):
         '''Discovers and sets a topological ordering consistent with the adjacency matrix.'''
@@ -492,6 +495,7 @@ class Graph(object):
     def _gen_coefficients_UVN(self, low=.5, high=2):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
         self *= np.random.choice(a=[-1,1], size=self.shape)
+        self._calc_cov()
     def _gen_coefficients_standardized(self, r_args={}):
         self._P = self.get_num_parents()
         self._r = self._initial_draws_r(**r_args)
@@ -515,6 +519,19 @@ class Graph(object):
         if matrix is None:
             matrix=self.A
         return self.select_vars(np.argsort(self.topo_order), A=matrix)
+    def _calc_cov(self):
+        P=self.get_num_parents()
+        loc_cov = deepcopy(self.select_vars(self.topo_order, A=self.cov))
+        A_loc = self.select_vars(self.topo_order)
+        for it, i in enumerate(self.topo_order):
+            loc_cov[it,it] = self.s[i]**2
+            if P[i]!=0:
+                A_curr = A_loc[:,[it]]
+                loc_cov[:it,[it]] = np.matmul(loc_cov, A_curr)[:it,:]
+                loc_cov[it,:] = loc_cov[:,it]
+                loc_cov[it,it] += np.matmul(np.matmul(A_curr.T, loc_cov), A_curr)
+        self.cov = self._re_sort(loc_cov)
+        self.A = self._re_sort(A_loc)
     def _rescale_coefficients(self):
         #Need to go through by topological order!
         r = self._r
