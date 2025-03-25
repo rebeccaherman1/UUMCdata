@@ -135,8 +135,7 @@ class Graph(object):
                  "must match the number of variables {}").format(len(labels), self.N)
             self.labels = labels
         else:
-            #TODO: doesn't print right when i>9
-            self.labels = ["$X_{}$".format(i) for i in self.variables]
+            self.labels = ["$X_{{{}}}$".format(i) for i in self.variables]
         self._make_shape()
         _check_option('init_type', self.graph_types_, init_type)
         self.init_type = init_type
