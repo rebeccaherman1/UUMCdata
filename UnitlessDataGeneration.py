@@ -1,4 +1,4 @@
-"""Unitless Unrestricted Markov-Consistent (time-series) Linear Additive SCM and Data Generation 
+"""Unitless Unrestricted Markov-Consistent (time-series) Linear Additive Gaussian SCM and Data Generation 
 (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
@@ -25,15 +25,19 @@ from dao import corr
 
 class SortabilityPlotting():
     @classmethod
-    def plot_sortability_dist(cls, sort_list, labels, title, legend_title="Edge Likelihood", fontsize=None):
+    def plot_sortability_dist(cls, sort_list, labels, title, 
+                              legend_title="Edge Likelihood", fontsize=None):
         for i, r2sort in enumerate(sort_list):
-            _ = plt.hist(r2sort, density=True, cumulative=False, bins=20, alpha=.5, label=labels[i])
+            _ = plt.hist(r2sort, density=True, cumulative=False, 
+                         bins=20, alpha=.5, label=labels[i])
         plt.xlim([0,1])
-        plt.legend(title=legend_title, loc="upper right", fontsize=fontsize, title_fontsize=fontsize)
+        plt.legend(title=legend_title, loc="upper right", 
+                   fontsize=fontsize, title_fontsize=fontsize)
         plt.title(title)
     @classmethod
     def plot_box(cls, d, pos, lc, fc, label, widths=.5):
-        bp1 = plt.boxplot(d, positions = pos, manage_ticks = False, patch_artist=True, showfliers=False, widths=widths)
+        bp1 = plt.boxplot(d, positions = pos, manage_ticks = False, 
+                          patch_artist=True, showfliers=False, widths=widths)
         for element in bp1.keys():
                 plt.setp(bp1[element], color=lc)
         for patch in bp1['boxes']:
@@ -43,7 +47,8 @@ class SortabilityPlotting():
     def plot_stat_dist(cls, r2s, title):
         plt.xlim([0,1])
         for i in range(r2s.shape[1]):
-            _ = plt.hist(r2s[:,i], density=True, cumulative=False, bins=20, alpha=.5, label=str(i))
+            _ = plt.hist(r2s[:,i], density=True, cumulative=False, 
+                         bins=20, alpha=.5, label=str(i))
         plt.legend(title="Node", fontsize='small')
         plt.title(title)
         plt.xlabel("R2 score")
@@ -101,10 +106,13 @@ class DataSet(list):
             return super().__repr__()
         return "<List of {} {}{}>".format(len(self), type(self[0]).__name__, 's' if len(self)!=1 else '')
 
+#TODO change name to SCM
 class Graph(object):
     r"""Data-generation object, and methods for creating and manipulating them.
-    Always contains a causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
-    May also hold generated data after calling GEN_DATA.
+    Always contains a causal graph. 
+    Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS.
+    May also hold generated data after calling GEN_DATA. 
+    Adjacency matrices can be manipulated and new GRAPHS can be created using magic functions. 
     
     Attributes
     _______________________________
@@ -132,16 +140,32 @@ class Graph(object):
     AXIS_LABELS : dictionary
         names of the dimensions of the adjacency array and the dimension index.
     graph_types_ : list
-        accepted options for init_type
+        accepted options for INIT_TYPE during GRAPH generation / initialization
     generation_options_ : list
-        accepted options for gen_coefficients
+        accepted options for STYLE in GEN_COEFFICIENTS()
+    
+    Initialization Options
+    ______________________
+    __init__ : see below
+    specified : Class Method shortcut for initializing a GRAPH from a specified adjacency array
+    from_causallearn : Class method to initialize GRAPH from a causal-learn cpdag
 
-    Class Functions
-    _______________
-    specified : shortcut for initializing graphs from a specified adjacency array
-    ccopy : creates a copy of the current SCM
-    select_vars : select a subset of the adjacency array showing direct effects
-                  between the specified variables.
+    Other Class Methods
+    ___________________
+    gen_dataset : create many graphs/SCMs with generated data
+
+    Adjacency Matrix Manipulation Functions
+    _______________________________________
+    MAGIC FUNCTIONS
+    G[i,j] : G.A[i,j] (can retrieve and set values this way)
+    G == G' : G.A == G'.A
+    abs(G) : returns a new Graph with G'.A = abs(G.A)
+    +, -, *, /, ** : If given 2 GRAPHS, returns a new GRAPH. 
+                     If given a GRAPH and a float, modifies the graph in place.
+    NUMPY FUNCTIONS 
+    sum, any, inv : takes a GRAPH and returns an array or value
+    triu : returns a new GRAPH
+    i_triu : modifies the GRAPH in place
     """
     #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
@@ -162,7 +186,7 @@ class Graph(object):
         init_type : string (default: 'ER')
             Method for generating the adjacency matrix. Options include:
                 'connected': a fully-connected acyclic time series DAG
-                'ER': Erdös-Rényi random graph generation. randomly include edges 
+                'ER': Erdös-Rényi random graph generation. Randomly include edges 
                       with probability P
                 'disconnected': a graph with no edges
                 'specified': A causal graph with adjacency matrix INIT
@@ -210,7 +234,7 @@ class Graph(object):
             self._remove_cycles()
             if init_type=='disconnected':
                 self *= 0
-            elif init_type!='connected': #random or no_feedback
+            elif init_type!='connected': #ER or no_feedback
                 self._make_random(p)
             #randomize the order of appearance of the variables
             self.shuffle()
@@ -223,10 +247,12 @@ class Graph(object):
 
     @classmethod
     def from_causallearn(cls, cpdag):
+        '''creage a GRAPH object from a causal-learn cpdag'''
         return Graph.specified(cpdag.graph)
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
+        '''Generate a DATASET with data generated from B SCMs with N variables each and O (for 'observations') samples.'''
         Gs = []
         for i in range(B):
             if len(Gs)%every==0:
@@ -239,6 +265,8 @@ class Graph(object):
 
     #User-available retrieval functions
     def to_causallearn(self):
+        '''Create a causal-learn CausalDag from current adjacency matrix.
+        Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
         adjacency_matrix = self.get_adjacencies()
         num_nodes = adjacency_matrix.shape[0]
         cg = CausalGraph(num_nodes)
@@ -247,27 +275,25 @@ class Graph(object):
                 edge1 = cg.G.get_edge(cg.G.nodes[i], cg.G.nodes[j])
                 if edge1 is not None:
                     cg.G.remove_edge(edge1)
-    
         for i in range(num_nodes):
             for j in range(num_nodes):
                 if adjacency_matrix[i,j] == 1:
                     cg.G.add_edge(Edge(cg.G.nodes[i], cg.G.nodes[j], Endpoint.TAIL, Endpoint.ARROW))
-    
         DAG = cg.G
         return DAG
     def get_adjacencies(self, **args):
-        '''returns an NxN boolean matrix where A[i,j]=True if X_i --> X_j'''
+        '''returns an NxN boolean matrix where A[i,j]=True iff X_i --> X_j'''
         return self.A != 0
     def order(self, i):
-        '''returns the placement of the variable at index i in the topological order'''
+        '''returns the placement in the topological order of the variable at index i'''
         return np.where(self.topo_order==i)[0]
     def get_num_parents(self):
         '''Returns an np.array of length N containing the number of parent processes 
         of each variable (in the summary graph)'''
         return self.sum(matrix=self.get_adjacencies(include_auto=False), axis='source')
     def ancestry(self):
-        r'''Returns an N x N matrix summarizing ancestries in the summary graph.
-        The i,j-th is True if X_i is an ancestor of X_j and False otherwise.
+        r'''Returns an N x N matrix summarizing ancestries in the (summary) graph.
+        The i,j-th entry is True if X_i is an ancestor of X_j and False otherwise.
         '''
         E = self.get_adjacencies(include_auto=True)
         Ek = E.copy()
@@ -287,23 +313,28 @@ class Graph(object):
         return deepcopy(self)
 
     #user-available modification functions
-    def deduce_topo_order(self):
-        '''Discovers and sets a topological ordering consistent with the adjacency matrix.'''
-        anc = self.ancestry()
-        num_ancestors = self.sum(matrix=anc, axis='source')
-        self.topo_order = np.argsort(num_ancestors)
-    def shuffle(self):
-        '''Randomly shuffles the order of the variables.'''
-        new_order = np.arange(self.N)
-        np.random.shuffle(new_order)
-        self.A = self.select_vars(new_order)
-        self.topo_order = np.argsort(new_order)
-        return
     def gen_coefficients(self, style='UUMC'):
-        r'''Creates an SCM from the graph using one of two generation styles:
+        r'''Creates an SCM from the graph using any of the options from GENERATION_OPTIONS_:
             UUMC : Procudes unitless, unrestricted, Markov-consistent SCMs. introduced here, recommended.
+                   (https://doi.org/10.48550/arXiv.2503.17037)
             unit-variance-noise : Draws coefficients from a uniform distribution and sets all
                                   noise variances to 1. typically used, here for comparison.
+                                  (https://doi.org/10.48550/arXiv.1803.01422)
+            iSCM : Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. 
+                   During data generation, the coefficients (and data) for each variable are 
+                   standardized by the sample standard deviation of the generated data before
+                   moving on to the next variable in the topological order.
+                   (https://arxiv.org/abs/2406.11601)
+            IPA : Each variable is scaled down by the variance it would have had if its parents were independent.
+                  (http://jmlr.org/papers/v21/17-123.html)
+            50-50 : Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA.
+                    During data generation, data for each variable is generated first without noise, 
+                    then the coefficients and data are scaled down to have a variance of 1/2, and 
+                    noise with variance 1/2 is added before moving on to the next variable in the 
+                    topological order.
+                    (https://proceedings.mlr.press/v177/squires22a.html)
+            DaO : DAG Adaptation of the Onion Method; dao.py taken from https://github.com/bja43/DaO_simulation
+                  (https://doi.org/10.48550/arXiv.2405.13100)
         '''
         _check_option('style', self.generation_options_, style)
         self.style = style
@@ -350,6 +381,18 @@ class Graph(object):
                 X[i,:]/=sample_std
         self.data = Data(self.N, P, self.labels, X)
         return self.data
+    def deduce_topo_order(self):
+        '''Discovers and sets a topological ordering consistent with the adjacency matrix.'''
+        anc = self.ancestry()
+        num_ancestors = self.sum(matrix=anc, axis='source')
+        self.topo_order = np.argsort(num_ancestors)
+    def shuffle(self):
+        '''Randomly shuffles the order of the variables.'''
+        new_order = np.arange(self.N)
+        np.random.shuffle(new_order)
+        self.A = self.select_vars(new_order)
+        self.topo_order = np.argsort(new_order)
+        return
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
@@ -673,9 +716,10 @@ class Graph(object):
         return "Graph {}".format(id(self))
 
 class tsGraph(Graph):
-    r"""Data-generation object, and methods for creating and manipulating them.
-    Always contains a causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
+    r"""Time-series Data-generation object, and methods for creating and manipulating them.
+    Always contains a time-series causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
     May also hold generated data after calling GEN_DATA.
+    Adjacency matrices can be manipulated and new GRAPHS can be created using magic functions. 
     
     Parameters
     __________
@@ -711,17 +755,30 @@ class tsGraph(Graph):
     AXIS_LABELS : dictionary
         names of the dimensions of the adjacency array and the dimension index.
     graph_types_ : list
-        accepted inputs for init_type
+        accepted options for INIT_TYPE during GRAPH generation / initialization
+    generation_options_ : list
+        accepted options for STYLE in GEN_COEFFICIENTS()
     specified : shortcut for initializing graphs from a specified adjacency array
-    gen_unitless_time_series : wrapper function for generating a large amount
-                               of random data and associated ground-truth SCMs.
-    ccopy : creates a copy of the current SCM
-    select_vars : select a subset of the adjacency array showing direct effects
-                  between the specified variables.
+    gen_dataset : wrapper function for generating a large amount
+                  of random data and associated ground-truth SCMs.
+
+    Adjacency Matrix Manipulation Functions
+    _______________________________________
+    MAGIC FUNCTIONS
+    G[i,j] : G.A[i,j] (can retrieve and set values this way)
+    G == G' : G.A == G'.A
+    abs(G) : returns a new Graph with G'.A = abs(G.A)
+    +, -, *, /, ** : If given 2 GRAPHS, returns a new GRAPH. 
+                     If given a GRAPH and a float, modifies the graph in place.
+    NUMPY FUNCTIONS 
+    sum, any, inv : takes a GRAPH and returns an array or value
+    triu : returns a new GRAPH
+    i_triu : modifies the GRAPH in place
     """
     AXIS_LABELS = Graph.AXIS_LABELS
     AXIS_LABELS['time'] = 2
     graph_types_ = Graph.graph_types_ + ['no_feedback']
+    generation_options_ = Graph.generation_options_[:2] #UUMC and unit-variance-noise
     
     def __init__(self, N, tau_max, 
                  init_type='ER', p=.5, p_auto=.8, #TODO change p_auto default to None?
@@ -820,6 +877,7 @@ class tsGraph(Graph):
     #User-available retrieval functions
     #order, get_num_parents, ancestry, select_vars
     def get_num_lags(self):
+        r'''Returns tau_max + 1'''
         return len(self.lags)
     def get_adjacencies(self, include_auto=True):
         r'''Returns an N x N summary-graph adjacency matrix.
@@ -830,6 +888,11 @@ class tsGraph(Graph):
             adj = remove_diagonal(adj)
         return adj
     def cycle_ancestry(self):
+        r'''Returns a list of cycles and 
+            a matrix describing the ancestral relationships between them.
+            The i,j-th entry is True is collected_cycles[i] are ancestors of 
+            collected_cycles[j] and False otherwise.
+        '''
         anc = self.ancestry()
         cycles = np.triu(remove_diagonal(anc*anc.T))
         collected_cycles = []
@@ -1597,6 +1660,7 @@ def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, t
 
 if __name__ == '__main__':
     '''Beta. to be updated.'''
+    #TODO there is no such function!
     Gs, Ds, text_trap = tsGraph.gen_unitless_time_series(10, 1, B=10)
     print(text_trap.getvalue())
     axs = plt.figure(figsize=(7,6), layout="constrained").subplots(2,2)
