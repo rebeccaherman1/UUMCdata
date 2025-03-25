@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+from pandas import DataFrame as df
 
-#TODO make better __repr__ for iid data!
 class Data(object):
     AXIS_LABELS = {'variables': 0, 'observations': 1}
     analysis_options = ['var', 'R2']
@@ -48,6 +49,15 @@ class Data(object):
             else:
                 R2s[i] = 1.0 - resid[0]/norm
         return R2s
+
+    def __repr__(self):
+        sns.set(style='ticks', font_scale=.7)
+        g = sns.PairGrid(df({l: self.data[i] for i, l in enumerate(self.labels)}), 
+                         diag_sharey=False, height=1, aspect=1.15, layout_pad=0.1)
+        g.map_upper(sns.scatterplot, size=.5)
+        g.map_lower(sns.kdeplot, fill=True)
+        g.map_diag(sns.kdeplot)
+        return "Data {}".format(id(self))
 
 class TimeSeries(Data):
     r""" Time Series Data object.
