@@ -309,12 +309,12 @@ class Graph(object):
             self[:,i]/=sample_std
             self.s[i]/=sample_std
             X[i,:]/=sample_std
-        def rescale_50(i):
+        def rescale_50(i, to_add):
             #scale so half the variance is noise
             X[i,:]/=np.sqrt(2)
             sample_std = np.sqrt(2)*np.std(to_add)
             self[:,i]/=sample_std
-            to_add/=sample_std            
+            return to_add/sample_std            
             
         if self.style=='iSCM':
             rescale_iSCM(self.topo_order[0])
@@ -325,7 +325,7 @@ class Graph(object):
             to_add=np.matmul(self[:,[i]].T,X)
             
             if self.style=='50-50' and par[i] != 0:
-                rescale_50(i)
+                to_add = rescale_50(i, to_add)
 
             #complete data
             X[[i],:]+=to_add
