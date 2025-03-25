@@ -1,8 +1,10 @@
 import sys
 import signal
 from contextlib import contextmanager
+from sympy import Matrix
 
-__all__ = ["_time_lim", "_check_given", "_check_option", "_progress_message", "_clear_progress_message", "_check_vars"]
+__all__ = ["_time_lim", "_check_given", "_check_option", "_progress_message", "_clear_progress_message", "_check_vars",
+          "UnstableError", "ConvergenceError", "GenerationError", "OptionError"]
 
 #Checks and errors
 class UnstableError(Exception): pass
