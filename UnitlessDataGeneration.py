@@ -314,12 +314,12 @@ class Graph(object):
         return deepcopy(self)
 
     #user-available modification functions
-    def gen_coefficients(self, style='UUMC'):
+    def gen_coefficients(self, style='UUMC', gen_args={}):
         r'''Creates an SCM from the graph using any of the options from GENERATION_OPTIONS_:
             UUMC : Procudes unitless, unrestricted, Markov-consistent SCMs. introduced here, recommended.
                    (https://doi.org/10.48550/arXiv.2503.17037)
-            unit-variance-noise : Draws coefficients from a uniform distribution and sets all
-                                  noise variances to 1. typically used, here for comparison.
+            unit-variance-noise : Draws coefficients uniformly from [-HIGH, -LOW] U [LOW, HIGH], and sets all
+                                  noise variances to 1. Defaults LOW=.5, HIGH=2. typically used.
                                   (https://doi.org/10.48550/arXiv.1803.01422)
             iSCM : Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. 
                    During data generation, the coefficients (and data) for each variable are 
@@ -336,6 +336,17 @@ class Graph(object):
                     (https://proceedings.mlr.press/v177/squires22a.html)
             DaO : DAG Adaptation of the Onion Method; dao.py taken from https://github.com/bja43/DaO_simulation
                   (https://doi.org/10.48550/arXiv.2405.13100)
+
+            gen_args : dict (optional; default = {})
+                additional arguments for generation styles. 
+                unit-variance-noise:
+                    low : float (optional, default=0.5)
+                    high : float (optional, default=2.)
+                UUMC:
+                    dist : function (optional, default=np.random.uniform)
+                        The function from which to draw r^(#parents). 
+                        Must be able to take size=(self.N,) as an input, and have support on (0,1).
+                    
         '''
         _check_option('style', self.generation_options_, style)
         self.style = style
@@ -343,20 +354,22 @@ class Graph(object):
         self._reset_cov()
         self._reset_s2()
         if self.style=='UUMC':
-            self._gen_coefficients_standardized() #sets cov and s
-        elif self.style=='IPA':
+            self._gen_coefficients_standardized(r_args = gen_args)
+        elif self.style=='IPA': #cov not set
             self._gen_coefficients_UVN(low=0.5, high=1.5)
             for i in self.topo_order[1:]:
                 norm=np.sqrt(np.sum(self[:,i]**2)+1)
                 self[:,i]/=norm
-                self.s[i]/=norm                    #set s but not cov
-        elif self.style=='50-50':                  #set neither
+                self.s[i]/=norm                    
+        elif self.style=='50-50': #cov not set, s modified later
             self._gen_coefficients_UVN(low=0.25, high=1)
-        elif self.style=='DaO':                    #sets cov and s
+        elif self.style=='DaO': 
             self.cov, B, self.s = corr(self.A.T)
             self.A = B.T
-        else:
-            self._gen_coefficients_UVN()           #sets neither
+        elif self.style=='iSCM': #cov not set, s modified later
+            self._gen_coefficients_UVN()
+        else: #UVN
+            self._gen_coefficients_UVN(**gen_args) #cov not set
         return self        
     def gen_data(self, P):
         '''Generates and returns a dataset with P observations from the current SCM'''
@@ -479,9 +492,9 @@ class Graph(object):
     def _gen_coefficients_UVN(self, low=.5, high=2):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
         self *= np.random.choice(a=[-1,1], size=self.shape)
-    def _gen_coefficients_standardized(self):
+    def _gen_coefficients_standardized(self, r_args={}):
         self._P = self.get_num_parents()
-        self._r = self._initial_draws_r()
+        self._r = self._initial_draws_r(**r_args)
         self._initial_draws_A()
         self._rescale_coefficients() #sets s and cov
     def _reset_adjacency_matrix(self):
@@ -492,8 +505,8 @@ class Graph(object):
         self.s = np.ones((self.N,))  
     def _initial_draws_A(self):
         self *= np.random.normal(size=self.shape) #coefficient draws -- a'
-    def _initial_draws_r(self):
-        r = np.random.uniform(size=(self.N,)) #starting draws -- r
+    def _initial_draws_r(self, dist=np.random.uniform):
+        r = dist(size=(self.N,)) #starting draws -- r
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             r=r**(1/self._P)
