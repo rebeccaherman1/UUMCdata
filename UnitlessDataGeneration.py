@@ -533,10 +533,8 @@ class Graph(object):
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
     def _rescale_coefficients(self):
-        #Need to go through by topological order!
         r = self._r
         P = self._P
-        checks=[time.time()]
         ind_length = (self**2).sum(axis='source') #constant when parents are independent
         r[ind_length==0]=0
         ind_length[ind_length==0]=1
@@ -557,16 +555,9 @@ class Graph(object):
                 loc_cov[:it,[it]] = np.matmul(loc_cov, A_loc[:,[it]])[:it,:]
                 loc_cov[it,:] = loc_cov[:,it]
                 
-        checks+=[time.time()]
         self.s = np.divide(((1-r**2)*ind_length)**.5,Cs)
-        
-        checks+=[time.time()]
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
-        
-        checks+=[time.time()]
-        checks=np.array(checks)
-        #print("Elapsed time to... calc C/cov={:.2f}, calc s2={:.2f}, re-sort={:.2f}".format(*list(checks[1:]-checks[:-1])))
 
     #Display helper functions for overwriting
     def _get_num_cols(self):
