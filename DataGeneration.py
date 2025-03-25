@@ -29,6 +29,7 @@ def remove_diagonal(M):
     return M * (np.diag(np.diag(M))==0)
 
 #TODO change name to SCM
+#TODO create derivative MEC object?
 class Graph(object):
     r"""Data-generation object, and methods for creating and manipulating them.
     Always contains a causal graph. 
@@ -186,6 +187,7 @@ class Graph(object):
         return DataSet(Gs)
 
     #User-available retrieval functions
+    #TODO add communication with more packages?
     def to_causallearn(self):
         '''Create a causal-learn CausalDag from current adjacency matrix.
         Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
