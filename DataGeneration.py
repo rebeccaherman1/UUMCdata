@@ -1344,25 +1344,3 @@ class tsGraph(Graph):
             and self.tau_max==G.tau_max 
             and super().__eq__(self, G)
         )
-
-if __name__ == '__main__':
-    '''Beta. to be updated.'''
-    #TODO there is no such function!
-    Gs, Ds, text_trap = tsGraph.gen_unitless_time_series(10, 1, B=10)
-    print(text_trap.getvalue())
-    axs = plt.figure(figsize=(7,6), layout="constrained").subplots(2,2)
-    plt.subplot(2,2,1)
-    plt.hist(np.array([d.var() for d in Ds]).flatten())
-    plt.title("Variance")
-    plt.subplot(2,2,2)
-    plt.hist(np.array([d.sortability() for d in Gs]).flatten())
-    plt.xlim([0,1])
-    plt.title("Varsortability")
-    plt.subplot(2,2,3)
-    plt.hist(np.array([d.sortability('R2') for d in Gs]).flatten())
-    plt.xlim([0,1])
-    plt.title("R2-sortability")
-    plt.subplot(2,2,4)
-    plt.hist(np.array([d.sortability('R2_summary') for d in Gs]).flatten())
-    plt.xlim([0,1])
-    plt.title("R2'-sortability")
