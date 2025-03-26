@@ -573,7 +573,7 @@ class Graph(object):
     def __ipow__(self, other):
         return self._i_pass_on(lambda x,y : x**y, other)
 
-    def _ij_style(self,i,j):
+    def _ij_style(self,ref, sig):
         return "arc3"
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
@@ -631,12 +631,15 @@ class Graph(object):
         def add_edge(i, j, artists, ax):
             posA=artists[i].center
             posB=artists[j].center
-            if i<j:
-                connectionstyle=self._ij_style(i,j)
-            elif i==j:
+            ref = (j-i)%self.N - self.N/2
+            if i==j:
                 connectionstyle="arc3,rad=2"
                 posA = artists[i].get_corners()[0]
                 posB = artists[i].get_corners()[1]
+            elif (ref < 0) or ((ref==0) and (i<j)):
+                sig = 1 if (((j-i)%self.N==1) or (ref==0)) else -1
+                connectionstyle=self._ij_style((self.N/2 + ref)/self.N*2, 
+                                               sig)
             else:
                 connectionstyle="arc3"
             arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
@@ -1348,5 +1351,6 @@ class tsGraph(Graph):
             and super().__eq__(self, G)
         )
 
-    def _ij_style(self, i,j):
-        return "arc3,rad={}".format(((j-i)%round(self.N/2))/self.N)
+    def _ij_style(self, ref, sig):
+        rad = sig*.4*4/self.N
+        return "arc3,rad={}".format(rad)
