@@ -28,7 +28,6 @@ def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
     return M * (np.diag(np.diag(M))==0)
 
-#TODO change name to SCM
 #TODO create derivative MEC object?
 class CausalModel(object):
     r"""Data-generation object, and methods for creating and manipulating them.
