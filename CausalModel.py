@@ -30,12 +30,13 @@ def remove_diagonal(M):
 
 #TODO change name to SCM
 #TODO create derivative MEC object?
-class Graph(object):
+class CausalModel(object):
     r"""Data-generation object, and methods for creating and manipulating them.
-    Always contains a causal graph. 
-    Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS.
+    Always contains a causal graph with adjacencies self.get_adjacencies() where a_{ji}=1 <=> X_j -> X_i
+    Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS. Causal coefficients are given
+    by self.A and noise standard deviations are given by self.s.
     May also hold generated data after calling GEN_DATA. 
-    Adjacency matrices can be manipulated and new GRAPHS can be created using magic functions. 
+    Adjacency/coefficient matrices can be manipulated and new CAUSALMODELs can be created using magic functions. 
     
     Attributes
     _______________________________
@@ -63,15 +64,15 @@ class Graph(object):
     AXIS_LABELS : dictionary
         names of the dimensions of the adjacency array and the dimension index.
     graph_types_ : list
-        accepted options for INIT_TYPE during GRAPH generation / initialization
+        accepted options for INIT_TYPE during CAUSALMODEL generation / initialization
     generation_options_ : list
         accepted options for STYLE in GEN_COEFFICIENTS()
     
     Initialization Options
     ______________________
     __init__ : see below
-    specified : Class Method shortcut for initializing a GRAPH from a specified adjacency array
-    from_causallearn : Class method to initialize GRAPH from a causal-learn cpdag
+    specified : Class Method shortcut for initializing a CAUSALMODEL from a specified adjacency array
+    from_causallearn : Class method to initialize CAUSALMODEL from a causal-learn cpdag
 
     Other Class Methods
     ___________________
@@ -82,14 +83,14 @@ class Graph(object):
     MAGIC FUNCTIONS
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
     G == G' : G.A == G'.A
-    abs(G) : returns a new Graph with G'.A = abs(G.A)
-    the following functions may take 2 GRAPHs or a GRAPH and a float.
-    +, -, *, /, ** : Returns a new GRAPH. 
-    +=, -=, *=, /=, **= : Modifies the GRAPH in place.
+    abs(G) : returns a new CAUSALMODEL with G'.A = abs(G.A)
+    the following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float.
+    +, -, *, /, ** : Returns a new CAUSALMODEL. 
+    +=, -=, *=, /=, **= : Modifies the CAUSALMODEL in place.
     NUMPY FUNCTIONS 
-    sum, any, inv : takes a GRAPH and returns an array or value
-    triu : returns a new GRAPH
-    i_triu : modifies the GRAPH in place
+    sum, any, inv : takes a CAUSALMODEL and returns an array or value
+    triu : returns a new CAUSALMODEL
+    i_triu : modifies the CAUSALMODEL in place
     """
     #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
@@ -164,14 +165,14 @@ class Graph(object):
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
-        '''Helper function for initializing a graph from a specified adjacency matrix'''
+        '''Helper function for initializing a CAUSALMODEL from a specified adjacency/coefficient matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
                    init_type='specified', init=init, labels=labels, noise=noise)
 
     @classmethod
     def from_causallearn(cls, cpdag):
-        '''creage a GRAPH object from a causal-learn cpdag'''
-        return Graph.specified(cpdag.graph)
+        '''creage a CAUSALMODEL object from a causal-learn cpdag'''
+        return CausalModel.specified(cpdag.graph)
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
@@ -233,7 +234,7 @@ class Graph(object):
             A = self.A
         return A[V,:][:,V]
     def copy(self):
-        '''Creates a new graph equivalent to the input graph G.'''
+        '''Creates a new CAUSALMODEL equivalent to the input CAUSALMODEL G.'''
         return deepcopy(self)
 
     #user-available modification functions
@@ -498,7 +499,7 @@ class Graph(object):
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
         return (
-            isinstance(G, Graph) 
+            isinstance(G, CAUSALMODEL) 
             and self.N==G.N
             and (self.select_vars(self.topo_order)==G.select_vars(G.topo_order)).all()
         )
@@ -517,17 +518,17 @@ class Graph(object):
     def inv(self, matrix=None):
         return self._pass_on_solo(np.linalg.inv, matrix=matrix)
 
-    #returning a new graph
+    #returning a new CausalModel
     def _pass_on(self, func, other=None):
         G_new = deepcopy(self)
         if other is None:
             G_new.A = func(self.A)
         elif type(other) in [np.ndarray, float, int]:
             G_new.A = func(self.A,other)
-        elif type(other) is Graph:
+        elif type(other) is CausalModel:
             G_new.A = func(self.A,other.A)
         else:
-            raise TypeError("{} is not supported for type Graph and type {}".format(
+            raise TypeError("{} is not supported for type CausalModel and type {}".format(
                 func,type(other)))
         return G_new
     def __abs__(self):
@@ -547,16 +548,16 @@ class Graph(object):
     def __pow__(self, other):
         return self._pass_on(lambda x,y : x**y, other)
 
-    #modifying the graph in place
+    #modifying the CausalModel in place
     def _i_pass_on(self, func, other=None):
         if other is None:
             self.A = func(self.A)
         elif type(other) in [np.ndarray, float, int]:
             self.A = func(self.A,other)
-        elif type(other) is Graph:
+        elif type(other) is CausalModel:
             self.A = func(self.A,other.A)
         else:
-            raise TypeError("{} is not supported for type Graph and type {}".format(
+            raise TypeError("{} is not supported for type CausalModel and type {}".format(
                 func,type(other)))
         return self
     def i_triu(self):
@@ -679,13 +680,13 @@ class Graph(object):
         return str(self)
 
     def __str__(self):
-        return "Graph {}".format(id(self))
+        return "CausalModel {}".format(id(self))
 
-class tsGraph(Graph):
+class tsCausalModel(CausalModel):
     r"""Time-series Data-generation object, and methods for creating and manipulating them.
     Always contains a time-series causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
     May also hold generated data after calling GEN_DATA.
-    Adjacency matrices can be manipulated and new GRAPHS can be created using magic functions. 
+    Adjacency matrices can be manipulated and new tsCausalModels can be created using magic functions. 
     
     Parameters
     __________
@@ -721,10 +722,10 @@ class tsGraph(Graph):
     AXIS_LABELS : dictionary
         names of the dimensions of the adjacency array and the dimension index.
     graph_types_ : list
-        accepted options for INIT_TYPE during GRAPH generation / initialization
+        accepted options for INIT_TYPE during tsCausalModel generation / initialization
     generation_options_ : list
         accepted options for STYLE in GEN_COEFFICIENTS()
-    specified : shortcut for initializing graphs from a specified adjacency array
+    specified : shortcut for initializing tsCausalModels from a specified adjacency array
     gen_dataset : wrapper function for generating a large amount
                   of random data and associated ground-truth SCMs.
 
@@ -733,19 +734,19 @@ class tsGraph(Graph):
     MAGIC FUNCTIONS
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
     G == G' : G.A == G'.A
-    abs(G) : returns a new Graph with G'.A = abs(G.A)
-    the following functions may take 2 GRAPHs or a GRAPH and a float.
-    +, -, *, /, ** : Returns a new GRAPH. 
-    +=, -=, *=, /=, **= : Modifies the GRAPH in place.
+    abs(G) : returns a new tsCAUSALMODEL with G'.A = abs(G.A)
+    the following functions may take 2 tsCAUSALMODELs or a tsCAUSALMODEL and a float.
+    +, -, *, /, ** : Returns a new tsCAUSALMODEL. 
+    +=, -=, *=, /=, **= : Modifies the tsCAUSALMODEL in place.
     NUMPY FUNCTIONS 
-    sum, any, inv : takes a GRAPH and returns an array or value
-    triu : returns a new GRAPH
-    i_triu : modifies the GRAPH in place
+    sum, any, inv : takes a tsCAUSALMODEL and returns an array or value
+    triu : returns a new tsCAUSALMODEL
+    i_triu : modifies the tsCAUSALMODEL in place
     """
-    AXIS_LABELS = Graph.AXIS_LABELS
+    AXIS_LABELS = CausalModel.AXIS_LABELS
     AXIS_LABELS['time'] = 2
-    graph_types_ = Graph.graph_types_ + ['no_feedback']
-    generation_options_ = Graph.generation_options_[:2] #UUMC and unit-variance-noise
+    graph_types_ = CausalModel.graph_types_ + ['no_feedback']
+    generation_options_ = CausalModel.generation_options_[:2] #UUMC and unit-variance-noise
     
     def __init__(self, N, tau_max, 
                  init_type='ER', p=.5, p_auto=.8, #TODO change p_auto default to None?
@@ -790,7 +791,7 @@ class tsGraph(Graph):
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
-        '''Helper function for initializing a graph from a specified adjacency matrix'''
+        '''Helper function for initializing a tsCAUSALMODEL from a specified adjacency/coefficient matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, labels=labels, noise=noise)
     
@@ -1285,7 +1286,7 @@ class tsGraph(Graph):
         M = Matrix(
             np.linalg.inv(self[:,:,0]+np.diag(np.ones((self.N,))))
             - np.sum(self[:,:,1:]*np.array([[[z**i for i in self.lags[1:]]]]), 
-                     axis=tsGraph.AXIS_LABELS['time'])
+                     axis=tsCausalModel.AXIS_LABELS['time'])
         ).det()
         S = solve(M)
         return (np.array([Abs(s) for s in S])>1).all()
@@ -1346,7 +1347,7 @@ class tsGraph(Graph):
     #Magic Functions
     def __eq__(self, G):
         return (
-            isinstance(G, tsGraph) 
+            isinstance(G, tsCausalModel) 
             and self.tau_max==G.tau_max 
             and super().__eq__(self, G)
         )

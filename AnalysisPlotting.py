@@ -1,4 +1,4 @@
-from DataGeneration import *
+from CausalModel import *
 import scipy.stats
 
 class SortabilityPlotting():
@@ -51,7 +51,8 @@ def sortability_compare_collider_confounder(Ns = [i for i in range(3,22)], T = 5
         r2s  = np.empty((B,2, len(Ns)))*np.nan
         for n, N in enumerate(Ns):
             print('N = {}:'.format(N))
-            Gs = Graph.gen_dataset(N,T,B,init_args = {'init_type': 'specified', 'init': adj_type_dict[k](N)})
+            Gs = CausalModel.gen_dataset(N,T,B,init_args = {'init_type': 'specified', 
+                                                            'init': adj_type_dict[k](N)})
             r2s[:,:,n] = np.array([g.data.R2()[[0,-1]] for g in Gs]).squeeze()
         r2dict[k] = r2s
     plt.figure(figsize=(4,3))
@@ -74,7 +75,8 @@ def sortability_compare_duple_types(O = 500, B = 50000, tau_max=1):
 
     for k in keys:
         print("{}s:".format(k))
-        Gs = tsGraph.gen_dataset(N=2, tau_max=tau_max, T=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
+        Gs = tsCausalModel.gen_dataset(N=2, tau_max=tau_max, T=O, B=B, init_args={'init_type': 'specified',
+                                                                                  'init': adj_types[k]})
         r2dict[k] = np.array([g.data.R2(tau_max=tau_max) for g in Gs])
         
 
@@ -112,10 +114,11 @@ def sortability_compare_triple_types(O = 500, B = 50000, tau_max=None):
     for k in keys:
         print("{}s:".format(k))
         if tau_max is None:
-            Gs = Graph.gen_dataset(N=3, O=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
+            Gs = CausalModel.gen_dataset(N=3, O=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
             r2dict[k] = np.array([g.data.R2() for g in Gs])
         else:
-            Gs = tsGraph.gen_dataset(N=3, tau_max=tau_max, T=O, B=B, init_args={'init_type': 'specified', 'init': adj_types[k]})
+            Gs = tsCausalModel.gen_dataset(N=3, tau_max=tau_max, T=O, B=B, 
+                                           init_args={'init_type': 'specified', 'init': adj_types[k]})
             r2dict[k] = np.array([g.data.R2(tau_max=tau_max) for g in Gs])
         
 
@@ -158,9 +161,9 @@ def sortability_compare_p(N=20, ps=[i/10 for i in range(1,11)], O=100, B=5000, t
         print("p = {}:".format(p))
         further_init_args['p']=p
         if tau_max is None:
-            Gs = Graph.gen_dataset(N=N, O=O, B=B, init_args=further_init_args, coef_args=coef_args)
+            Gs = CausalModel.gen_dataset(N=N, O=O, B=B, init_args=further_init_args, coef_args=coef_args)
         else:
-            Gs = tsGraph.gen_dataset(N=N, tau_max=tau_max, T=O, B=B, init_args=further_init_args, coef_args=coef_args)
+            Gs = tsCausalModel.gen_dataset(N=N, tau_max=tau_max, T=O, B=B, init_args=further_init_args, coef_args=coef_args)
         varsort = [g.sortability() for g in Gs]
         r2sort2  = [g.sortability('R2') for g in Gs]
         p_dict[p] = (varsort, r2sort2)
