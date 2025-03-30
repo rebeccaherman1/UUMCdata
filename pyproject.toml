@@ -22,7 +22,7 @@ classifiers = [ #I suppose I should check if I want to add anything, but it look
   "License :: OSI Approved :: BSD License", #?
   "Intended Audience :: Science/Research",
 ]
-dependencies = [#is there such a thing as an optional dependency? (i.e. for to_ and from_ functions)
+dependencies = [
   "numpy",
   "sympy",
   "io",
@@ -33,7 +33,7 @@ dependencies = [#is there such a thing as an optional dependency? (i.e. for to_ 
   "matplotlib",
   "re",
   "daosim",
-  #"causallearn",
+  "importlib",
   "sys",
   "signal",
   "seaborn",
