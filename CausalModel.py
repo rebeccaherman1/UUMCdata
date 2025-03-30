@@ -15,12 +15,12 @@ from contextlib import redirect_stdout
 import warnings
 from copy import deepcopy
 import time
+import importlib
 
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
 import re
 
-from causallearn.graph.GraphClass import CausalGraph
 from daosim import corr
 
 #user-available helper function
@@ -170,7 +170,8 @@ class CausalModel(object):
     @classmethod
     def from_causallearn(cls, cpdag):
         '''creage a CAUSALMODEL object from a causal-learn cpdag'''
-        return CausalModel.specified(cpdag.graph)
+        _A = cpdag.graph
+        return CausalModel.specified(-_A*(_A<0))
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
@@ -190,9 +191,10 @@ class CausalModel(object):
     def to_causallearn(self):
         '''Create a causal-learn CausalDag from current adjacency matrix.
         Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
+        cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
         adjacency_matrix = self.get_adjacencies()
         num_nodes = adjacency_matrix.shape[0]
-        cg = CausalGraph(num_nodes)
+        cg = cl.CausalGraph(num_nodes)
         for i in range(num_nodes):
             for j in range(num_nodes):
                 edge1 = cg.G.get_edge(cg.G.nodes[i], cg.G.nodes[j])
@@ -201,7 +203,7 @@ class CausalModel(object):
         for i in range(num_nodes):
             for j in range(num_nodes):
                 if adjacency_matrix[i,j] == 1:
-                    cg.G.add_edge(Edge(cg.G.nodes[i], cg.G.nodes[j], Endpoint.TAIL, Endpoint.ARROW))
+                    cg.G.add_edge(cl.Edge(cg.G.nodes[i], cg.G.nodes[j], cl.Endpoint.TAIL, cl.Endpoint.ARROW))
         DAG = cg.G
         return DAG
     def get_adjacencies(self, **args):
