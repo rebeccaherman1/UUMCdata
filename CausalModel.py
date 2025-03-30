@@ -80,7 +80,7 @@ class CausalModel(object):
     _______________________________________
     MAGIC FUNCTIONS
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
-    G == G' : G.A == G'.A
+    G == G' : G.A == G'.A after sorting to the topological order (TODO what about s and when multiple topo orders work?)
     abs(G) : returns a new CAUSALMODEL with G'.A = abs(G.A)
     the following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float.
     +, -, *, /, ** : Returns a new CAUSALMODEL. 
@@ -102,7 +102,7 @@ class CausalModel(object):
                           ]
 
     def __init__(self, N, init_type='ER', p=.5, 
-                 init=None, noise=None, labels=None):
+                 init=None, noise=None, labels=None): #TODO add some of these to the attributes description
         """
         Optional Parameters
         ___________________
@@ -165,7 +165,7 @@ class CausalModel(object):
     def specified(cls, init, noise=None, labels=None):
         '''Helper function for initializing a CAUSALMODEL from a specified adjacency/coefficient matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
-                   init_type='specified', init=init, labels=labels, noise=noise)
+                   init_type='specified', init=init.astype(float), labels=labels, noise=noise)
 
     @classmethod
     def from_causallearn(cls, cpdag):
@@ -177,7 +177,21 @@ class CausalModel(object):
     def from_networkx(cls, nxg, noise=None):
         '''create a CAUSALMODEL object from a networkx DiGraph'''
         nx = importlib.__import__('networkx')
-        return cls.specified(nx.to_numpy_array(nxg), noise=noise, labels=list(nxg.nodes))
+        return cls.specified(nx.to_numpy_array(nxg), noise=noise, labels=list(map(str,list(nxg.nodes))))
+
+    @classmethod
+    def from_causaldag(cls, gmg):
+        '''create a CAUSALMODEL object from a CAUSALDAG (gauss)dag'''
+        gm = importlib.__import__('graphical_models')
+        if isinstance(gmg, gm.GaussDAG):
+            G2 cls.specified(gmg.to_amat(), noise=gmg.variances**.5)
+            G2.cov = gmg.covariance
+            return G2
+        elif isinstance(gmg, gm.DAG):
+            return cls.specified(gmg.to_amat()[0])
+        else:
+            raise TypeError("gmg must be type graphical_models.DAG or type graphical_models.GaussDAG," + 
+                            " not {}".format(type(gmg)))
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
@@ -425,6 +439,14 @@ class CausalModel(object):
         '''Create a networkx DiGraph from current adjacency matrix.'''
         nx = importlib.__import__('networkx')
         return nx.from_numpy_array(self.A, create_using=nx.DiGraph, nodelist = self.labels)
+    def to_causaldag(self):
+        '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
+        gm = importlib.__import__('graphical_models')
+        if self.s is None:
+            gmg = gm.DAG.from_amat(self.A)
+        else:
+            gmg = gm.GaussDAG.from_amat(self.A, variances = self.s**2)
+        return gmg
 
     #gen_coefficients helper functions
     def _gen_coefficients_UVN(self, low=.5, high=2):
@@ -508,7 +530,7 @@ class CausalModel(object):
         return self.A.__getitem__(tpl)
     def __setitem__(self, tpl, v):
         return self.A.__setitem__(tpl,v)
-    def __eq__(self, G):
+    def __eq__(self, G): #TODO want to add noises to this if they are set
         return (
             isinstance(G, CausalModel) 
             and self.N==G.N
