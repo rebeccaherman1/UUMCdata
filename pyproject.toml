@@ -1,0 +1,43 @@
+[build-system] #what does this mean?
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "UUMCdata"
+description = """Unitless, Unrestricted, Markov-Consistent Random SCM and Data Generation."""
+authors = [
+    {name = "Rebecca J. Herman"}, #is this only for authors who have actually contributed to the code?
+]
+license = {text = "BSD 3-Clause License"} #need to carefully pick a license
+keywords = [
+  "benchmark",
+  "data generation",
+  "causal discovery",
+]
+classifiers = [ #I suppose I should check if I want to add anything, but it looks good
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "License :: OSI Approved :: BSD License", #?
+  "Intended Audience :: Science/Research",
+]
+dependencies = [#is there such a thing as an optional dependency? (i.e. for to_ and from_ functions)
+  "numpy",
+  "sympy",
+  "io",
+  "contextlib",
+  "warnings",
+  "copy",
+  "time",
+  "matplotlib",
+  "re",
+  "daosim",
+  #"causallearn",
+  "sys",
+  "signal",
+  "seaborn",
+  "pandas",
+]
+readme = "README.md"
+version = "0.0.0"
