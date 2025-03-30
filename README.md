@@ -6,9 +6,9 @@ Our work focuses on generation of linear additive Gaussian Structural Causal Mod
 | :-- | :-- |
 | [UUMC](https://doi.org/10.48550/arXiv.2503.17037) | Procudes unitless, unrestricted, Markov-consistent SCMs. Introduced here; default option. |
 | [unit-variance-noise](https://doi.org/10.48550/arXiv.1803.01422) | Draws coefficients uniformly from [-HIGH, -LOW] U [LOW, HIGH], and sets all noise variances to 1. Defaults LOW=.5, HIGH=2. |
-| [iSCM](https://arxiv.org/abs/2406.11601) | Begins with UVN SCM generation. During data generation, the coefficients (and data) for each variable are standardized by the sample standard deviation of the generated data before moving on to the next variable in the topological order. |
-| [IPA](http://jmlr.org/papers/v21/17-123.html) | Each variable is scaled down by the variance it would have had if its parents were independent. |
-| [50-50](https://proceedings.mlr.press/v177/squires22a.html) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, data for each variable is generated first without noise, then the coefficients and data are scaled down to have a variance of 1/2, and noise with variance 1/2 is added before moving on to the next variable in the topological order. |
+| [iSCM](https://arxiv.org/abs/2406.11601) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, the structural parameters (and data) for each variable are standardized by the sample standard deviation of the generated data before moving on to the next variable in the topological order. |
+| [IPA](http://jmlr.org/papers/v21/17-123.html) | The structural parameters for each variable are scaled down by the variance the variable would have had if its parents were independent. |
+| [50-50](https://proceedings.mlr.press/v177/squires22a.html) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, data for each variable is generated first without noise, then the causal coefficients and data are scaled down to have a variance of 1/2, and noise with variance 1/2 is added before moving on to the next variable in the topological order. |
 | [DaO](https://doi.org/10.48550/arXiv.2405.13100) | DAG Adaptation of the Onion Method. |
                   
 To generate random data ([example](example.ipynb)):
