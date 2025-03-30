@@ -4,7 +4,7 @@ Unitless, Unrestricted, Markov-Consistent Random Static (or Time Series, beta) S
 Our work focuses on generation of linear additive Gaussian Structural Causal Models (SCM) given a causal graph. In addition to our proposed approach, our package supports other approaches examined in the UUMC paper for comparison:
 | Method | Description |
 | :-- | :-- |
-| [UUMC](https://doi.org/10.48550/arXiv.2503.17037) | Procudes unitless, unrestricted, Markov-consistent SCMs. introduced here, recommended. |
+| [UUMC](https://doi.org/10.48550/arXiv.2503.17037) | Procudes unitless, unrestricted, Markov-consistent SCMs. Introduced here; default option. |
 | [unit-variance-noise](https://doi.org/10.48550/arXiv.1803.01422) | Draws coefficients uniformly from [-HIGH, -LOW] U [LOW, HIGH], and sets all noise variances to 1. Defaults LOW=.5, HIGH=2. |
 | [iSCM](https://arxiv.org/abs/2406.11601) | Begins with UVN SCM generation. During data generation, the coefficients (and data) for each variable are standardized by the sample standard deviation of the generated data before moving on to the next variable in the topological order. |
 | [IPA](http://jmlr.org/papers/v21/17-123.html) | Each variable is scaled down by the variance it would have had if its parents were independent. |
