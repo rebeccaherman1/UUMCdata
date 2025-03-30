@@ -1408,7 +1408,7 @@ class tsCausalModel(CausalModel):
         return (
             isinstance(G, tsCausalModel) 
             and self.tau_max==G.tau_max 
-            and super().__eq__(self, G)
+            and super().__eq__(G)
         )
 
     def _ij_style(self, ref, sig):
