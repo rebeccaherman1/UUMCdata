@@ -171,7 +171,13 @@ class CausalModel(object):
     def from_causallearn(cls, cpdag):
         '''creage a CAUSALMODEL object from a causal-learn cpdag'''
         _A = cpdag.graph
-        return CausalModel.specified(-_A*(_A<0))
+        return cls.specified(-_A*(_A<0))
+
+    @classmethod
+    def from_networkx(cls, nxg, noise=None):
+        '''create a CAUSALMODEL object from a networkx DiGraph'''
+        nx = importlib.__import__('networkx')
+        return cls.specified(nx.to_numpy_array(nxg), noise=noise, labels=list(nxg.nodes))
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
@@ -187,25 +193,6 @@ class CausalModel(object):
         return DataSet(Gs)
 
     #User-available retrieval functions
-    #TODO add communication with more packages?
-    def to_causallearn(self):
-        '''Create a causal-learn CausalDag from current adjacency matrix.
-        Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
-        cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
-        adjacency_matrix = self.get_adjacencies()
-        num_nodes = adjacency_matrix.shape[0]
-        cg = cl.CausalGraph(num_nodes)
-        for i in range(num_nodes):
-            for j in range(num_nodes):
-                edge1 = cg.G.get_edge(cg.G.nodes[i], cg.G.nodes[j])
-                if edge1 is not None:
-                    cg.G.remove_edge(edge1)
-        for i in range(num_nodes):
-            for j in range(num_nodes):
-                if adjacency_matrix[i,j] == 1:
-                    cg.G.add_edge(cl.Edge(cg.G.nodes[i], cg.G.nodes[j], cl.Endpoint.TAIL, cl.Endpoint.ARROW))
-        DAG = cg.G
-        return DAG
     def get_adjacencies(self, **args):
         '''returns an NxN boolean matrix where A[i,j]=True iff X_i --> X_j'''
         return self.A != 0
@@ -415,6 +402,30 @@ class CausalModel(object):
         self.deduce_topo_order()
         return
 
+    #Communication with other packages
+    def to_causallearn(self):
+        '''Create a causal-learn CausalDag from current adjacency matrix.
+        Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
+        cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
+        adjacency_matrix = self.get_adjacencies()
+        num_nodes = adjacency_matrix.shape[0]
+        cg = cl.CausalGraph(num_nodes)
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                edge1 = cg.G.get_edge(cg.G.nodes[i], cg.G.nodes[j])
+                if edge1 is not None:
+                    cg.G.remove_edge(edge1)
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if adjacency_matrix[i,j] == 1:
+                    cg.G.add_edge(cl.Edge(cg.G.nodes[i], cg.G.nodes[j], cl.Endpoint.TAIL, cl.Endpoint.ARROW))
+        DAG = cg.G
+        return DAG
+    def to_networkx(self):
+        '''Create a networkx DiGraph from current adjacency matrix.'''
+        nx = importlib.__import__('networkx')
+        return nx.from_numpy_array(self.A, create_using=nx.DiGraph, nodelist = self.labels)
+
     #gen_coefficients helper functions
     def _gen_coefficients_UVN(self, low=.5, high=2):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
@@ -499,7 +510,7 @@ class CausalModel(object):
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
         return (
-            isinstance(G, CAUSALMODEL) 
+            isinstance(G, CausalModel) 
             and self.N==G.N
             and (self.select_vars(self.topo_order)==G.select_vars(G.topo_order)).all()
         )
