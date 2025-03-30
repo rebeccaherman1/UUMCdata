@@ -848,6 +848,19 @@ class tsCausalModel(CausalModel):
             init = init.reshape(init.shape+(1,)) #assuming tau_max=0
         return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, labels=labels, noise=noise)
+
+    @classmethod
+    def from_tigramite(cls, tgG):
+        from_tig = np.vectorize(lambda x: (x=='-->')*1.0)
+        if isinstance(tgG, isinstance(tgG, np.ndarray)):
+            if not ((tgG=='-->') + (tgG=='') + (tgG=='<--')).all():
+                raise ValueError("all edges must be directed: '', '-->', or '<--'")
+            tgA = tgG
+        else:
+            if tgG.graph_type!='dag':
+                raise ValueError("can only interpret tigramite dags, not {}".format(tsG.graph_type))
+            tgA = tgG.graph
+        return cls.specified(from_tig(tgA))
     
     @classmethod
     def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, verbose=False, text_trap=None):
@@ -1058,6 +1071,12 @@ class tsCausalModel(CausalModel):
     def _check_static(self, pkg):
         if self.tau_max>0:
             raise ValueError("Cannot transport tsCausalModel with tau_max = {} to {}".format(self.tau_max, pkg))
+    def to_tigramite(self, verbosity=0): #TODO check when '<--' is used
+        tg = importlib.__import__('tigramite')
+        to_tig = np.vectorize(lambda x: '-->' if x>0 else '<--' if x<0 else '')
+        A_ = self.A
+        A_[:,:,0]-=A_[:,:,0].T
+        return tg.Graphs(to_tig(A_), 'dag', tau_max = self.tau_max, verbosity=verbosity)
     
     #Initialization Helper Functions
     #_rand_edges, _make_specified
