@@ -150,7 +150,7 @@ class CausalModel(object):
 
         #initializion of the adjacency matrix and topological order
         if init_type=='specified':
-            self._make_specified(init)
+            self._make_specified(init.astype(float))
         else:
             #Make a fully-connected DAG
             self.A = np.ones(shape=self.shape)
@@ -166,7 +166,7 @@ class CausalModel(object):
     def specified(cls, init, noise=None, labels=None):
         '''Helper function for initializing a CAUSALMODEL from a specified adjacency/coefficient matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
-                   init_type='specified', init=init.astype(float), labels=labels, noise=noise)
+                   init_type='specified', init=init, labels=labels, noise=noise)
 
     @classmethod
     def from_causallearn(cls, cpdag):
@@ -426,7 +426,7 @@ class CausalModel(object):
         '''Create a causal-learn CausalDag from current adjacency matrix.
         Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
         cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
-        adjacency_matrix = self.get_adjacencies()
+        adjacency_matrix = self.get_adjacencies().squeeze()
         num_nodes = adjacency_matrix.shape[0]
         cg = cl.CausalGraph(num_nodes)
         for i in range(num_nodes):
@@ -443,14 +443,15 @@ class CausalModel(object):
     def to_networkx(self):
         '''Create a networkx DiGraph from current adjacency matrix.'''
         nx = importlib.__import__('networkx')
-        return nx.from_numpy_array(self.A, create_using=nx.DiGraph, nodelist = self.labels)
+        return nx.from_numpy_array(self.A.squeeze(), create_using=nx.DiGraph, nodelist = self.labels)
     def to_causaldag(self):
         '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
         gm = importlib.__import__('graphical_models')
+        A_ = self.A.squeeze()
         if self.s is None:
-            gmg = gm.DAG.from_amat(self.A)
+            gmg = gm.DAG.from_amat(A_)
         else:
-            gmg = gm.GaussDAG.from_amat(self.A, variances = self.s**2)
+            gmg = gm.GaussDAG.from_amat(A_, variances = self.s**2)
         return gmg
 
     #gen_coefficients helper functions
@@ -838,6 +839,8 @@ class tsCausalModel(CausalModel):
     @classmethod
     def specified(cls, init, noise=None, labels=None):
         '''Helper function for initializing a tsCAUSALMODEL from a specified adjacency/coefficient matrix'''
+        if len(init.shape)==2:
+            init = init.reshape(init.shape+(1,)) #assuming tau_max=0
         return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
                    init_type='specified', init=init, labels=labels, noise=noise)
     
