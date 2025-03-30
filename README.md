@@ -9,7 +9,7 @@ Our work focuses on generation of linear additive Gaussian Structural Causal Mod
 | [iSCM](https://arxiv.org/abs/2406.11601) | Begins with UVN SCM generation. During data generation, the coefficients (and data) for each variable are standardized by the sample standard deviation of the generated data before moving on to the next variable in the topological order. |
 | [IPA](http://jmlr.org/papers/v21/17-123.html) | Each variable is scaled down by the variance it would have had if its parents were independent. |
 | [50-50](https://proceedings.mlr.press/v177/squires22a.html) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, data for each variable is generated first without noise, then the coefficients and data are scaled down to have a variance of 1/2, and noise with variance 1/2 is added before moving on to the next variable in the topological order. |
-| [DaO](https://doi.org/10.48550/arXiv.2405.13100) | DAG Adaptation of the Onion Method; [dao.py](dao.py) taken directly from https://github.com/bja43/DaO_simulation. |
+| [DaO](https://doi.org/10.48550/arXiv.2405.13100) | DAG Adaptation of the Onion Method. |
                   
 To generate random data ([example](example.ipynb)):
 1. Initialize a graph in a `CausalModel` or `tsCausalModel` object ([CausalModel.py](CausalModel.py)). This can be done:

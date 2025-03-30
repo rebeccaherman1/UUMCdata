@@ -21,14 +21,13 @@ from matplotlib import patches as mpatches
 import re
 
 from causallearn.graph.GraphClass import CausalGraph
-from dao import corr
+from daosim import corr
 
 #user-available helper function
 def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
     return M * (np.diag(np.diag(M))==0)
 
-#TODO create derivative MEC object?
 class CausalModel(object):
     r"""Data-generation object, and methods for creating and manipulating them.
     Always contains a causal graph with adjacencies self.get_adjacencies() where a_{ji}=1 <=> X_j -> X_i
@@ -634,6 +633,9 @@ class CausalModel(object):
             ref = (j-i)%self.N - self.N/2
             if i==j:
                 connectionstyle="arc3,rad=2"
+                #print("i = {}".format(i))
+                #print(artists[i].get_corners())
+                #print(artists[i].get_verts())
                 posA = artists[i].get_corners()[0]
                 posB = artists[i].get_corners()[1]
             elif (ref < 0) or ((ref==0) and (i<j)):
@@ -748,7 +750,7 @@ class tsCausalModel(CausalModel):
     generation_options_ = CausalModel.generation_options_[:2] #UUMC and unit-variance-noise
     
     def __init__(self, N, tau_max, 
-                 init_type='ER', p=.5, p_auto=.8, #TODO change p_auto default to None?
+                 init_type='ER', p=.5, p_auto=.8,
                  init=None, noise=None, labels=None):
         """
         Optional Parameters
