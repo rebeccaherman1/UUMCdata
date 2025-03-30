@@ -422,9 +422,12 @@ class CausalModel(object):
         return
 
     #Communication with other packages
+    def _check_static(self, pkg):
+        return True
     def to_causallearn(self):
         '''Create a causal-learn CausalDag from current adjacency matrix.
         Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
+        self._check_static('causal-learn')
         cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
         adjacency_matrix = self.get_adjacencies().squeeze()
         num_nodes = adjacency_matrix.shape[0]
@@ -442,10 +445,12 @@ class CausalModel(object):
         return DAG
     def to_networkx(self):
         '''Create a networkx DiGraph from current adjacency matrix.'''
+        self._check_static('networkx')
         nx = importlib.__import__('networkx')
         return nx.from_numpy_array(self.A.squeeze(), create_using=nx.DiGraph, nodelist = self.labels)
     def to_causaldag(self):
         '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
+        self._check_static('causaldag')
         gm = importlib.__import__('graphical_models')
         A_ = self.A.squeeze()
         if self.s is None:
@@ -1049,6 +1054,11 @@ class tsCausalModel(CausalModel):
         R = super().sortability(func=func, tol=tol)
         return R
 
+    #Communication with other packages
+    def _check_static(self, pkg):
+        if self.tau_max>0:
+            raise ValueError("Cannot transport tsCausalModel with tau_max = {} to {}".format(self.tau_max, pkg))
+    
     #Initialization Helper Functions
     #_rand_edges, _make_specified
     def _make_shape(self):
