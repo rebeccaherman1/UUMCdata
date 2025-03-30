@@ -70,7 +70,8 @@ class CausalModel(object):
     ______________________
     __init__ : see below
     specified : Class Method shortcut for initializing a CAUSALMODEL from a specified adjacency array
-    from_causallearn : Class method to initialize CAUSALMODEL from a causal-learn cpdag
+    from_causallearn, from_networkx, from_causaldag : Class Method shortcuts for initializing a CAUSALMODEL
+                                                      from other packages.
 
     Other Class Methods
     ___________________
@@ -80,7 +81,7 @@ class CausalModel(object):
     _______________________________________
     MAGIC FUNCTIONS
     G[i,j] : G.A[i,j] (can retrieve and set values this way)
-    G == G' : G.A == G'.A after sorting to the topological order (TODO what about s and when multiple topo orders work?)
+    G == G' : returns whether G and G' are equivalent graphs or SCMs given indistinguishable nodes
     abs(G) : returns a new CAUSALMODEL with G'.A = abs(G.A)
     the following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float.
     +, -, *, /, ** : Returns a new CAUSALMODEL. 
@@ -184,7 +185,7 @@ class CausalModel(object):
         '''create a CAUSALMODEL object from a CAUSALDAG (gauss)dag'''
         gm = importlib.__import__('graphical_models')
         if isinstance(gmg, gm.GaussDAG):
-            G2 cls.specified(gmg.to_amat(), noise=gmg.variances**.5)
+            G2 = cls.specified(gmg.to_amat(), noise=gmg.variances**.5)
             G2.cov = gmg.covariance
             return G2
         elif isinstance(gmg, gm.DAG):
@@ -339,11 +340,15 @@ class CausalModel(object):
         if self.style in ['50-50', 'iSCM']:
             self._calc_cov()
         return self.data
-    def deduce_topo_order(self):
-        '''Discovers and sets a topological ordering consistent with the adjacency matrix.'''
+    def deduce_topo_order(self, modify = True):
+        '''Discovers and sets (or returns) a topological ordering consistent with the adjacency matrix.'''
         anc = self.ancestry()
         num_ancestors = self.sum(matrix=anc, axis='source')
-        self.topo_order = np.argsort(num_ancestors)
+        new_order = np.argsort(num_ancestors)
+        if modify:
+            self.topo_order = new_order
+        else:
+            return new_order
     def shuffle(self):
         '''Randomly shuffles the order of the variables.'''
         new_order = np.arange(self.N)
@@ -530,11 +535,16 @@ class CausalModel(object):
         return self.A.__getitem__(tpl)
     def __setitem__(self, tpl, v):
         return self.A.__setitem__(tpl,v)
-    def __eq__(self, G): #TODO want to add noises to this if they are set
+    def __eq__(self, G):
         return (
             isinstance(G, CausalModel) 
             and self.N==G.N
-            and (self.select_vars(self.topo_order)==G.select_vars(G.topo_order)).all()
+            and (self.select_vars(self.deduce_topo_order(modify=False))==
+                 G.select_vars(G.deduce_topo_order(modify=False))).all()
+            and (((self.s is None) and (G.s is None))
+                 or (((self.s is not None) and (G.s is not None))
+                     and (self.s[self.deduce_topo_order(modify=False)]==
+                          G.s[self.deduce_topo_order(modify=False)]).all()))
         )
     def _pass_on_solo(self, func, axis=None, matrix=None):
         if matrix is None:
