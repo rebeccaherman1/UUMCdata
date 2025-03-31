@@ -1071,10 +1071,10 @@ class tsCausalModel(CausalModel):
     def _check_static(self, pkg):
         if self.tau_max>0:
             raise ValueError("Cannot transport tsCausalModel with tau_max = {} to {}".format(self.tau_max, pkg))
-    def to_tigramite(self, verbosity=0): #TODO check when '<--' is used
-        tg = importlib.__import__('tigramite')
+    def to_tigramite(self, verbosity=0):
+        tg = importlib.__import__('tigramite.graphs')
         to_tig = np.vectorize(lambda x: '-->' if x>0 else '<--' if x<0 else '')
-        A_ = self.A
+        A_ = (self.A != 0)*1
         A_[:,:,0]-=A_[:,:,0].T
         return tg.Graphs(to_tig(A_), 'dag', tau_max = self.tau_max, verbosity=verbosity)
     
