@@ -1,5 +1,5 @@
 # UUMC SCM and Data Generation
-Unitless, Unrestricted, Markov-Consistent Random Static (or Time Series, beta) SCM and Data Generation [[paper]](https://doi.org/10.48550/arXiv.2405.13100).
+Unitless, Unrestricted, Markov-Consistent Random Static (or Time Series, beta) SCM and Data Generation [[paper]](https://doi.org/10.48550/arXiv.2503.17037).
 
 Our work focuses on generation of linear additive Gaussian Structural Causal Models (SCM) given a causal graph. In addition to our proposed approach, our package supports other approaches examined in the UUMC paper for comparison:
 | Method | Description |
