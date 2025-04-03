@@ -212,8 +212,8 @@ class CausalModel(object):
         elif isinstance(gmg, gm.DAG):
             return cls.specified(gmg.to_amat()[0])
         else:
-            raise TypeError("gmg must be type graphical_models.DAG or type " + 
-                            "graphical_models.GaussDAG, not {}".format(type(gmg)))
+            raise TypeError(("gmg must be type graphical_models.DAG or type ",
+                            "graphical_models.GaussDAG, not {}".format(type(gmg))))
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
@@ -1131,8 +1131,8 @@ class tsCausalModel(CausalModel):
                 continue
             self.data = TS
             return self.data
-        raise GenerationError("generated data has variance too var from 1: {} " + 
-                              "(tried {}x)".format(V, generation_attempts))
+        raise GenerationError(("generated data has variance too var from 1: {} ",
+                              "(tried {}x)".format(V, generation_attempts)))
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
@@ -1475,14 +1475,14 @@ class tsCausalModel(CausalModel):
                 new_msg = "discarded {} solution{} that did not converge".format(
                     discarded_c, 's' if discarded_c>1 else '')
             elif discarded_c == 0:
-                new_msg = "discarded {} unstable solution{} and {} solution{} producing a " + 
+                new_msg = ("discarded {} unstable solution{} and {} solution{} producing a ",
                 "covariance matrix that was not positive semi-definite".format(
                     discarded_u, 's' if discarded_u!=1 else '', 
-                    discarded_psd, 's' if discarded_psd!=1 else '')
+                    discarded_psd, 's' if discarded_psd!=1 else ''))
             else:
-                new_msg = "discarded {} solutions: {} unstable, {} producing a " + 
+                new_msg = ("discarded {} solutions: {} unstable, {} producing a ",
                 "non-positive semi-definite covariance matrix, and {} that did not converge".format(
-                    discarded_u+discarded_c+discarded_psd, discarded_u, discarded_psd, discarded_c)
+                    discarded_u+discarded_c+discarded_psd, discarded_u, discarded_psd, discarded_c))
         _clear_progress_message(new_msg)
 
     #generation helper funtions
