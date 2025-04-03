@@ -1,25 +1,25 @@
-[build-system] #what does this mean?
-requires = ["flit_core >=3.2,<4"]
+[build-system]
+requires = ["flit_core >= 3.12.0, <4"]
 build-backend = "flit_core.buildapi"
 
 [project]
 name = "UUMCdata"
 description = """Unitless, Unrestricted, Markov-Consistent Random SCM and Data Generation."""
 authors = [
-    {name = "Rebecca J. Herman"}, #is this only for authors who have actually contributed to the code?
+    {name = "Rebecca J. Herman"},
 ]
-license = {text = "BSD 3-Clause License"} #need to carefully pick a license
+license = {text = "GNU General Public License v3.0"}
 keywords = [
   "benchmark",
   "data generation",
   "causal discovery",
 ]
-classifiers = [ #I suppose I should check if I want to add anything, but it looks good
+classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Mathematics",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "License :: OSI Approved :: BSD License", #?
+  "License :: OSI Approved :: GNU License", 
   "Intended Audience :: Science/Research",
 ]
 dependencies = [
@@ -40,4 +40,4 @@ dependencies = [
   "pandas",
 ]
 readme = "README.md"
-version = "0.0.0"
+version = "0.0"
