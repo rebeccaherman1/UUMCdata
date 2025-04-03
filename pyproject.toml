@@ -19,7 +19,7 @@ classifiers = [
   "Topic :: Scientific/Engineering",
   "Topic :: Scientific/Engineering :: Mathematics",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
-  "License :: OSI Approved :: GNU License", 
+  "License :: OSI Approved :: GNU General Public License (GPL)",
   "Intended Audience :: Science/Research",
 ]
 dependencies = [
@@ -40,4 +40,4 @@ dependencies = [
   "pandas",
 ]
 readme = "README.md"
-version = "0.0"
+version = "0.1"
