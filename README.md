@@ -11,7 +11,7 @@ Our work focuses on generation of linear additive Gaussian Structural Causal Mod
 | [50-50](https://proceedings.mlr.press/v177/squires22a.html) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, data for each variable is generated first without noise, then the causal coefficients and data are scaled down by $\sqrt{2}$ times the sample standard deviation to have a variance of 1/2, and noise with variance 1/2 is added before moving on to the next variable in the topological order. |
 | [DaO](https://doi.org/10.48550/arXiv.2405.13100) | DAG Adaptation of the Onion Method. |
                   
-To generate random data ([example](UUMCdata/example.ipynb)):
+To generate random data ([example](examples/example.ipynb)):
 1. Initialize a graph in a `CausalModel` or `tsCausalModel` object ([UUMCdata/CausalModel.py](CausalModel.py)). This can be done:
    * randomly using [Erdös-Rényi sampling](https://www.degruyter.com/document/doi/10.1515/9781400841356.38/pdf?licenseType=restricted)
    * from a user-provided array where $a_{ji}=1 \Leftrightarrow X_j \rightarrow X_i$. For time series, $a_{ji\tau}=1 \Leftrightarrow X_j(t-\tau)\rightarrow X_i(t)$.
