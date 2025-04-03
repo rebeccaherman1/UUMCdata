@@ -1,5 +1,5 @@
-"""Unitless Unrestricted Markov-Consistent (time-series) Linear Additive Gaussian SCM and Data Generation 
-(https://doi.org/10.48550/arXiv.2503.17037)"""
+"""Unitless Unrestricted Markov-Consistent (time-series) Linear Additive 
+Gaussian SCM and Data Generation (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
 
@@ -29,49 +29,62 @@ def remove_diagonal(M):
     return M * (np.diag(np.diag(M))==0)
 
 class CausalModel(object):
-    r"""Data-generation object, and methods for creating and manipulating them.
-    Always contains a causal graph with adjacencies self.get_adjacencies() where a_{ji}=1 <=> X_j -> X_i
-    Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS. Causal coefficients are given
-    by self.A and noise standard deviations are given by self.s.
-    May also hold generated data after calling GEN_DATA. 
-    Adjacency/coefficient matrices can be manipulated and new CAUSALMODELs can be created using magic functions. 
+    r"""
+    Data-generation object, and methods for creating and manipulating them.
+    - Always contains a causal graph with adjacencies self.get_adjacencies() 
+      where a_{ji}=1 <=> X_j -> X_i. 
+    - Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS. 
+      Causal coefficients are given by self.A and noise standard deviations are 
+      given by self.s. 
+    - May also hold generated data after calling GEN_DATA. 
+    Adjacency/coefficient matrices can be manipulated and new CAUSALMODELs can 
+    be created using magic functions. 
     
     Attributes
     _______________________________
     N : int
         Number of random variables
-    A : (N x N) np.array
+    variables : iterable 
+        iterable over variable indices
+    labels : list of strings
+        Names of the variables
+    A : (N x N) np.array of floats
         A[i,j] is the effect of X_i on X_j.
-        When entries are 0 and 1, this is an adjacency matrix.
-        Otherwise, it is a causal coeficients matrix.
+        When entries are 0.0 and 1.0, this is an adjacency matrix.
+        Otherwise, it is a causal coeficients matrix
     s : np.array of length N
-        Noise standard deviations (if set or calculated)
+        Noise standard deviations (if set or calculated, else None)
     topo_order : np.array of length N
-        topological order of the variables
+        topological order of the variables (not unique)
     cov : (N x N) np.array
-        Theoretical covariance matrix (if coefficients are generated).
-        cov[i,j] is the covariance of X_i and X_j.
+        Theoretical covariance matrix (if coefficients are generated, else None).
+        cov[i,j] is the covariance of X_i and X_j
     data : Data object
-        data generated from this SCM (if generated)
-    variables : iterable over variable indices
-    shape = A.shape = (N x N)
-    style : SCM generation strategy
+        data generated from this SCM (if generated, else None)
+    init_type : string
+        Method for generating the adjacency matrix 
+    style : string
+        SCM generation strategy
+    shape : tuple
+        (N, N) = A.shape
 
     Class Constants
     _______________
     AXIS_LABELS : dictionary
-        names of the dimensions of the adjacency array and the dimension index.
+        names of the dimensions of the adjacency array and the dimension index
     graph_types_ : list
-        accepted options for INIT_TYPE during CAUSALMODEL generation / initialization
+        accepted options for INIT_TYPE during CAUSALMODEL generation/initialization
     generation_options_ : list
         accepted options for STYLE in GEN_COEFFICIENTS()
     
     Initialization Options
     ______________________
     __init__ : see below
-    specified : Class Method shortcut for initializing a CAUSALMODEL from a specified adjacency array
-    from_causallearn, from_networkx, from_causaldag : Class Method shortcuts for initializing a CAUSALMODEL
-                                                      from other packages.
+    specified : Class Method shortcut for initializing a CAUSALMODEL from a 
+                specified adjacency array
+    from_causallearn :
+    from_networkx    : Class Method shortcuts for initializing a CAUSALMODEL 
+    from_causaldag   : from other packages
 
     Other Class Methods
     ___________________
@@ -80,12 +93,17 @@ class CausalModel(object):
     Adjacency Matrix Manipulation Functions
     _______________________________________
     MAGIC FUNCTIONS
-    G[i,j] : G.A[i,j] (can retrieve and set values this way)
-    G == G' : returns whether G and G' are equivalent graphs or SCMs given indistinguishable nodes
-    abs(G) : returns a new CAUSALMODEL with G'.A = abs(G.A)
-    the following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float.
-    +, -, *, /, ** : Returns a new CAUSALMODEL. 
-    +=, -=, *=, /=, **= : Modifies the CAUSALMODEL in place.
+    G[i,j] : float
+        G.A[i,j] (can retrieve and set values this way)
+    abs(G) : CAUSALMODEL
+        returns a new CAUSALMODEL with G'.A = abs(G.A)
+    G == G' : boolean
+        returns whether G and G' are equivalent graphs or SCMs given 
+        indistinguishable nodes
+    The following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float:
+    +, -, *, /, ** : Returns a new CAUSALMODEL
+    +=, -=, *=, /=, **= : Modifies the CAUSALMODEL in place
+    
     NUMPY FUNCTIONS 
     sum, any, inv : takes a CAUSALMODEL and returns an array or value
     triu : returns a new CAUSALMODEL
@@ -94,38 +112,38 @@ class CausalModel(object):
     #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
     graph_types_ = ['ER', 'connected', 'disconnected', 'specified']
-    generation_options_ = ['UUMC', #https://doi.org/10.48550/arXiv.2503.17037
-                           'unit-variance-noise', #https://doi.org/10.48550/arXiv.1803.01422
-                           'iSCM', #https://arxiv.org/abs/2406.11601
-                           'IPA',  #http://jmlr.org/papers/v21/17-123.html
-                           '50-50', #https://proceedings.mlr.press/v177/squires22a.html
-                           'DaO' #https://doi.org/10.48550/arXiv.2405.13100
-                          ]
+    generation_options_ = [
+        'UUMC', #https://doi.org/10.48550/arXiv.2503.17037
+        'unit-variance-noise', #https://proceedings.neurips.cc/paper_files/paper/2018/file/e347c51419ffb23ca3fd5050202f9c3d-Paper.pdf
+        'iSCM', #https://arxiv.org/abs/2406.11601
+        'IPA',  #http://jmlr.org/papers/v21/17-123.html
+        '50-50', #https://proceedings.mlr.press/v177/squires22a.html
+        'DaO' #https://doi.org/10.48550/arXiv.2405.13100
+    ]
 
     def __init__(self, N, init_type='ER', p=.5, 
-                 init=None, noise=None, labels=None): #TODO add some of these to the attributes description
+                 init=None, noise=None, labels=None): 
         """
         Optional Parameters
         ___________________
         init_type : string (default: 'ER')
             Method for generating the adjacency matrix. Options include:
                 'connected': a fully-connected acyclic time series DAG
-                'ER': Erdös-Rényi random graph generation. Randomly include edges 
-                      with probability P
+                'ER': Erdös-Rényi random graph generation. 
+                      Randomly include edges with probability P
                 'disconnected': a graph with no edges
                 'specified': A causal graph with adjacency matrix INIT
         p : float (Default: 0.5)
             Probability of an edge during ER graph generation
-        init : N x N np.array (Default: None)
-            Adjacency matrix for specified initialization.
-            If the entries are not 1 and 0, 
-            then non-zero values are interpreted as causal coefficients.
+        init : N x N np.array of floats (Default: None)
+            Adjacency matrix for specified initialization. If the entries are 
+            not 1.0 and 0.0, then values are interpreted as causal coefficients
         noise : np.array of length N (Default: None)
-            Noise variances for each random variable for specified initialization.
+            Noise variances for specified initialization
         labels : list of strings (deault: None)
-            Names of the random variables during specified initialization.
+            Names of the random variables during specified initialization
         topo_order : np.array of length N (default: None)
-            Topological order for specified generation.
+            Topological order for specified initialization
         """
 
         #user-specified initializations
@@ -164,7 +182,8 @@ class CausalModel(object):
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
-        '''Helper function for initializing a CAUSALMODEL from a specified adjacency/coefficient matrix'''
+        '''Helper function for initializing a CAUSALMODEL from a specified 
+        adjacency/coefficient matrix'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
                    init_type='specified', init=init, labels=labels, noise=noise)
 
@@ -178,7 +197,9 @@ class CausalModel(object):
     def from_networkx(cls, nxg, noise=None):
         '''create a CAUSALMODEL object from a networkx DiGraph'''
         nx = importlib.__import__('networkx')
-        return cls.specified(nx.to_numpy_array(nxg), noise=noise, labels=list(map(str,list(nxg.nodes))))
+        return cls.specified(nx.to_numpy_array(nxg), 
+                             noise=noise, 
+                             labels=list(map(str,list(nxg.nodes))))
 
     @classmethod
     def from_causaldag(cls, gmg):
@@ -191,12 +212,13 @@ class CausalModel(object):
         elif isinstance(gmg, gm.DAG):
             return cls.specified(gmg.to_amat()[0])
         else:
-            raise TypeError("gmg must be type graphical_models.DAG or type graphical_models.GaussDAG," + 
-                            " not {}".format(type(gmg)))
+            raise TypeError("gmg must be type graphical_models.DAG or type " + 
+                            "graphical_models.GaussDAG, not {}".format(type(gmg)))
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
-        '''Generate a DATASET with data generated from B SCMs with N variables each and O (for 'observations') samples.'''
+        '''Generate a DATASET with data generated from B SCMs with N variables 
+        each and O (for 'observations') samples.'''
         Gs = []
         for i in range(B):
             if len(Gs)%every==0:
@@ -219,7 +241,7 @@ class CausalModel(object):
         of each variable (in the summary graph)'''
         return self.sum(matrix=self.get_adjacencies(include_auto=False), axis='source')
     def ancestry(self):
-        r'''Returns an N x N matrix summarizing ancestries in the (summary) graph.
+        r'''Returns an N x N boolean matrix summarizing ancestries in the (summary) graph.
         The i,j-th entry is True if X_i is an ancestor of X_j and False otherwise.
         '''
         E = self.get_adjacencies(include_auto=True)
@@ -241,46 +263,45 @@ class CausalModel(object):
 
     #user-available modification functions
     def gen_coefficients(self, style='UUMC', gen_args={}):
-        r'''Creates an SCM from the graph using any of the options from GENERATION_OPTIONS_:
-            UUMC : Procudes unitless, unrestricted, Markov-consistent SCMs. introduced here, recommended.
-                   (https://doi.org/10.48550/arXiv.2503.17037)
-            unit-variance-noise : Draws coefficients uniformly from [-HIGH, -LOW] U [LOW, HIGH], and sets all
-                                  noise variances to 1. Defaults LOW=.5, HIGH=2. typically used.
-                                  (https://doi.org/10.48550/arXiv.1803.01422)
-            iSCM : Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. 
-                   During data generation, the coefficients (and data) for each variable are 
-                   standardized by the sample standard deviation of the generated data before
-                   moving on to the next variable in the topological order.
+        r'''Creates an SCM from the graph using any STYLE from GENERATION_OPTIONS_:
+            UUMC : Procudes unitless, unrestricted, Markov-consistent SCMs. 
+                   Introduced here, recommended (https://doi.org/10.48550/arXiv.2503.17037)
+            unit-variance-noise : Draws coefficients uniformly from [-HIGH, -LOW]U[LOW, HIGH], 
+                                  and sets all noise variances to 1. Defaults LOW=.5, HIGH=2. 
+                                  Typically used (https://doi.org/10.48550/arXiv.1803.01422)
+            iSCM : Begins with UVN SCM generation. The SCM is not complete until calling 
+                   GEN_DATA. During data generation, the coefficients (and data) for each 
+                   variable are standardized by the sample standard deviation of the gener-
+                   ated data before moving on to the next variable in the topological order
                    (https://arxiv.org/abs/2406.11601)
-            IPA : Each variable is scaled down by the variance it would have had if its parents were independent.
-                  (http://jmlr.org/papers/v21/17-123.html)
-            50-50 : Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA.
-                    During data generation, data for each variable is generated first without noise, 
-                    then the coefficients and data are scaled down to have a variance of 1/2, and 
-                    noise with variance 1/2 is added before moving on to the next variable in the 
-                    topological order.
+            IPA : Each variable is scaled down by the variance it would have had if its 
+                  parents were independent (http://jmlr.org/papers/v21/17-123.html)
+            50-50 : Begins with UVN SCM generation. The SCM is not complete until calling 
+                    GEN_DATA. During data generation, data for each variable is generated 
+                    first without noise, then the coefficients and data are scaled down to 
+                    have a variance of 1/2, and noise with variance 1/2 is added before 
+                    moving on to the next variable in the topological order
                     (https://proceedings.mlr.press/v177/squires22a.html)
-            DaO : DAG Adaptation of the Onion Method; dao.py taken from https://github.com/bja43/DaO_simulation
+            DaO : DAG Adaptation of the Onion Method
                   (https://doi.org/10.48550/arXiv.2405.13100)
 
             gen_args : dict (optional; default = {})
-                additional arguments for generation styles. 
+                additional arguments for generation styles:
                 unit-variance-noise:
                     low : float (optional, default=0.5)
                     high : float (optional, default=2.)
                 UUMC:
                     dist : function (optional, default=np.random.uniform)
-                        The function from which to draw r^(#parents). 
-                        Must be able to take size=(self.N,) as an input, and have support on (0,1).
-                    
+                        The function from which to draw r^(#parents). Must have support on 
+                        (0,1) and accept size=(self.N,) as an input
         '''
         _check_option('style', self.generation_options_, style)
         self.style = style
         self._reset_adjacency_matrix()
         self._reset_cov()
-        self._reset_s2()
+        self._reset_s()
         if self.style=='UUMC':
-            self._gen_coefficients_standardized(r_args = gen_args)
+            self._gen_coefficients_UUMC(r_args = gen_args)
         elif self.style=='IPA':
             self._gen_coefficients_UVN(low=0.5, high=1.5)
             for i in self.topo_order[1:]:
@@ -338,10 +359,12 @@ class CausalModel(object):
         
         self.data = Data(self.N, P, self.labels, X)
         if self.style in ['50-50', 'iSCM']:
+            #recalculate covariance for modified SCMs
             self._calc_cov()
         return self.data
     def deduce_topo_order(self, modify = True):
-        '''Discovers and sets (or returns) a topological ordering consistent with the adjacency matrix.'''
+        '''Discovers and sets (or returns) a topological ordering 
+        consistent with the adjacency matrix.'''
         anc = self.ancestry()
         num_ancestors = self.sum(matrix=anc, axis='source')
         new_order = np.argsort(num_ancestors)
@@ -359,17 +382,18 @@ class CausalModel(object):
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
-        '''Calculates sortability of variables in the SCM according to a 
-        funtion of the user's choice on the generated data. The code is based on code 
+        '''Calculates sortability of variables in the SCM according to a funtion 
+        of the user's choice on the generated data. The code is based on code 
         found at <https://github.com/Scriddie/Varsortability>, in reference to 
-        Reisach, A. G., Seiler, C., & Weichwald, S. (2021). "Beware of the Simulated DAG! 
-        Causal Discovery Benchmarks May Be Easy To Game" (arXiv:2102.13647). Reisach's 
-        definition of sortability has been modified to avoid double-counting the pair-wise 
-        sortability of two variables with multiple causal paths between them, and has been 
-        further modified to accept graphs with cycles in the manner described by Christopher 
-        Lohse and Jonas Wahl in "Sortability of Time Series Data" (Submitted to the Causal 
-        Inference for Time Series Data Workshop at the 40th Conference on Uncertainty in 
-        Artificial Intelligence.). 
+        Reisach, A. G., Seiler, C., & Weichwald, S. (2021). "Beware of the 
+        Simulated DAG! Causal Discovery Benchmarks May Be Easy To Game" 
+        (arXiv:2102.13647). Reisach's definition of sortability has been modified 
+        to avoid double-counting the pair-wise sortability of two variables with 
+        multiple causal paths between them, and has been further modified to 
+        accept graphs with cycles in the manner described by Christopher Lohse 
+        and Jonas Wahl in "Sortability of Time Series Data" (Contribution to the 
+        Causal Inference for Time Series Data Workshop at the 40th Conference on 
+        Uncertainty in Artificial Intelligence, arXiv preprint arXiv:2407.13313). 
 
         Function options include:
             'var' : variance 
@@ -426,9 +450,11 @@ class CausalModel(object):
         return True
     def to_causallearn(self):
         '''Create a causal-learn CausalDag from current adjacency matrix.
-        Credit to ZehaoJin: https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
+        Credit to ZehaoJin: 
+        https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
         self._check_static('causal-learn')
-        cl = importlib.__import__('causallearn.graph.GraphClass', fromlist=['CausalGraph'])
+        cl = importlib.__import__('causallearn.graph.GraphClass', 
+                                  fromlist=['CausalGraph'])
         adjacency_matrix = self.get_adjacencies().squeeze()
         num_nodes = adjacency_matrix.shape[0]
         cg = cl.CausalGraph(num_nodes)
@@ -440,14 +466,17 @@ class CausalModel(object):
         for i in range(num_nodes):
             for j in range(num_nodes):
                 if adjacency_matrix[i,j] == 1:
-                    cg.G.add_edge(cl.Edge(cg.G.nodes[i], cg.G.nodes[j], cl.Endpoint.TAIL, cl.Endpoint.ARROW))
+                    cg.G.add_edge(cl.Edge(cg.G.nodes[i], cg.G.nodes[j], 
+                                          cl.Endpoint.TAIL, cl.Endpoint.ARROW))
         DAG = cg.G
         return DAG
     def to_networkx(self):
         '''Create a networkx DiGraph from current adjacency matrix.'''
         self._check_static('networkx')
         nx = importlib.__import__('networkx')
-        return nx.from_numpy_array(self.A.squeeze(), create_using=nx.DiGraph, nodelist = self.labels)
+        return nx.from_numpy_array(self.A.squeeze(), 
+                                   create_using=nx.DiGraph, 
+                                   nodelist = self.labels)
     def to_causaldag(self):
         '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
         self._check_static('causaldag')
@@ -464,16 +493,16 @@ class CausalModel(object):
         self *= np.random.uniform(low=low, high=high, size=self.shape)
         self *= np.random.choice(a=[-1,1], size=self.shape)
         self._calc_cov()
-    def _gen_coefficients_standardized(self, r_args={}):
+    def _gen_coefficients_UUMC(self, r_args={}):
         self._P = self.get_num_parents()
         self._r = self._initial_draws_r(**r_args)
         self._initial_draws_A()
         self._rescale_coefficients() #sets s and cov
     def _reset_adjacency_matrix(self):
-        self.A = self.A != 0
+        self.A = (self.A != 0) * 1.0
     def _reset_cov(self):
         self.cov = np.diag(np.ones((self.N,)))
-    def _reset_s2(self):
+    def _reset_s(self):
         self.s = np.ones((self.N,))  
     def _initial_draws_A(self):
         self *= np.random.normal(size=self.shape) #coefficient draws -- a'
@@ -484,6 +513,8 @@ class CausalModel(object):
             r=r**(1/self._P)
         return r
     def _re_sort(self, matrix=None):
+        '''Takes self.A or a matrix sorted topologically and returns the matrix 
+        sorted into the display order, which can be recovered from self.topo_order'''
         if matrix is None:
             matrix=self.A
         return self.select_vars(np.argsort(self.topo_order), A=matrix)
@@ -501,9 +532,10 @@ class CausalModel(object):
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
     def _rescale_coefficients(self):
+        '''Calculate UUMC coefficients/s/cov from initial draws.'''
         r = self._r
         P = self._P
-        ind_length = (self**2).sum(axis='source') #constant when parents are independent
+        ind_length = (self**2).sum(axis='source') #constant when parents independent
         r[ind_length==0]=0
         ind_length[ind_length==0]=1
         
@@ -527,13 +559,15 @@ class CausalModel(object):
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
 
-    #Display helper functions for overwriting
+    #Display helper functions for overwriting in the time series case
     def _get_num_cols(self):
         return 1
     def _make_table_titles(self):
         return np.array(["Coefficient"])
     def _get_coefficients(self, i, j):
         return [self[i,j]]
+    def _ij_style(self,ref, sig):
+        return "arc3"
 
     #Magic Functions
     #returning a matrix or element
@@ -623,8 +657,6 @@ class CausalModel(object):
     def __ipow__(self, other):
         return self._i_pass_on(lambda x,y : x**y, other)
 
-    def _ij_style(self,ref, sig):
-        return "arc3"
     def __repr__(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
         #helper function definitions
@@ -639,7 +671,8 @@ class CausalModel(object):
             if rep.shape[0]%2==1:
                 cs+=[['0.8']*(rep.shape[1])]
             subplot_ = table_id+1
-            ax[subplot_].table(cellText=rep, loc='center', rowLabels=ri, colLabels=h, cellLoc='center', cellColours=cs)
+            ax[subplot_].table(cellText=rep, loc='center', rowLabels=ri, 
+                               colLabels=h, cellLoc='center', cellColours=cs)
             ax[subplot_].axis("off")
         def make_table_contents(table_id, summary_edges):
             remaining_edges = summary_edges - table_id*ROWS_PER_TABLE
@@ -664,19 +697,23 @@ class CausalModel(object):
                 ROWS_PER_TABLE = 0
             fig_width = (DAG_width+(Table_width)*num_tables)/(1-w_space_frac)
             fig_height = DAG_width*(1-w_space_frac)
-            ax = plt.figure(figsize=(fig_width,fig_height), 
-                            layout="constrained").subplots(1,num_tables+1,
-                                                           width_ratios=[DAG_width]+[Table_width]*num_tables,
-                                                           gridspec_kw = {'wspace':w_space_frac})
+            ax = plt.figure(
+                figsize=(fig_width,fig_height), 
+                layout="constrained"
+            ).subplots(1,num_tables+1,
+                       width_ratios=[DAG_width]+[Table_width]*num_tables,
+                       gridspec_kw = {'wspace':w_space_frac})
             return ax, num_tables, ROWS_PER_TABLE
         def add_variable(i, label, ax):
             angle = 2*np.pi/self.N*i
             radius = .35
-            artist = mpatches.Ellipse((np.cos(angle)*radius+.5,np.sin(angle)*radius+.525),
-                                      .025*label_len(label)+.05, .1, ec="none")
+            artist = mpatches.Ellipse(
+                (np.cos(angle)*radius+.5,np.sin(angle)*radius+.525),
+                .025*label_len(label)+.05, .1, ec="none")
             artist.set(color="black")
             ax.add_artist(artist)
-            ax.annotate(label, (.5,.5), xycoords=artist, c='w', ha='center', va='center')
+            ax.annotate(label, (.5,.5), xycoords=artist, 
+                        c='w', ha='center', va='center')
             return artist
         def add_edge(i, j, artists, ax):
             posA=artists[i].center
@@ -684,20 +721,16 @@ class CausalModel(object):
             ref = (j-i)%self.N - self.N/2
             if i==j:
                 connectionstyle="arc3,rad=2"
-                #print("i = {}".format(i))
-                #print(artists[i].get_corners())
-                #print(artists[i].get_verts())
                 posA = artists[i].get_corners()[0]
                 posB = artists[i].get_corners()[1]
             elif (ref < 0) or ((ref==0) and (i<j)):
                 sig = 1 if (((j-i)%self.N==1) or (ref==0)) else -1
-                connectionstyle=self._ij_style((self.N/2 + ref)/self.N*2, 
-                                               sig)
+                connectionstyle=self._ij_style((self.N/2 + ref)/self.N*2, sig)
             else:
                 connectionstyle="arc3"
-            arrow = mpatches.FancyArrowPatch(posA, posB, patchA=artists[i], patchB=artists[j], 
-                                             arrowstyle='->', mutation_scale=15, color='k', 
-                                             connectionstyle=connectionstyle)
+            arrow = mpatches.FancyArrowPatch(
+                posA, posB, patchA=artists[i], patchB=artists[j], arrowstyle='->', 
+                mutation_scale=15, color='k', connectionstyle=connectionstyle)
             ax.add_artist(arrow)
 
         S = self.get_adjacencies(include_auto=True)
@@ -735,70 +768,98 @@ class CausalModel(object):
         return "CausalModel {}".format(id(self))
 
 class tsCausalModel(CausalModel):
-    r"""Time-series Data-generation object, and methods for creating and manipulating them.
-    Always contains a time-series causal graph, and becomes and SCM after calling GEN_COEFFICIENTS.
-    May also hold generated data after calling GEN_DATA.
-    Adjacency matrices can be manipulated and new tsCausalModels can be created using magic functions. 
+    r"""
+    Time-series Data-generation object, and methods for creating and manipulating them.
+    - Always contains a time-series causal graph with adjacencies self.A != 0
+      (self.adjacencies() returns the adjacencies in the summary graph)
+    - Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS. 
+      Causal coefficients are given by self.A and noise standard deviations are 
+      given by self.s. 
+    - May also hold generated data after calling GEN_DATA
+    Adjacency matrices can be manipulated and new tsCausalModels can be created 
+    using magic functions. 
     
     Parameters
     __________
     N : int
         Number of random variables
+    variables : iterable 
+        iterable over variable indices
+    labels : list of strings
+        Names of the variables
     tau_max : int
         Maximum delay between a cause and its effect
-    A : (N x N x tau_max+1) np.array
+    lags : iterable 
+        iterable over lags in the adjacency matrix
+    A : (N x N x tau_max+1) np.array of floats
         A[i,j,v] is the effect of X_i(t-v) on X_j(t).
-        When entries are 0 and 1, this is an adjacency matrix.
-        Otherwise, it is a causal coeficients matrix.
-    s2 : np.array of length N
-        Noise variances (if set or calculated)
+        When entries are 0.0 and 1.0, this is an adjacency matrix.
+        Otherwise, it is a causal coeficients matrix
+    s : np.array of length N
+        Noise standard deviations (if set or calculated, else None)
     topo_order : np.array of length N
         topological order of the variables
     components : list of 1-D np.arrays. 
         Variable indices are distributed among the arrays such that 
         each array is a component with feedback, and the arrays are 
-        ordered according to a valid topological ordering on the summary graph.
+        ordered according to a valid topological ordering on the summary graph
     cov : (2*tau_max+1 x N x N) np.array
-        Theoretical covariance matrix (if coeficients are generated).
-        cov[v,i,j] is the covariance of X_i(t) and X_j(t+v), 
-        where v can be negative.
+        Theoretical covariance matrix (if coeficients are generated, else None).
+        cov[v,i,j] is the covariance of X_i(t) and X_j(t+v); v can be negative
     data : TimeSeries object
-        data generated from this SCM (if generated)
-    variables : iterable over variable indices
-    lags : iterable over lags in the adjacency matrix
-    shape = A.shape = (N x N x tau_max+1)
-    style : SCM generation strategy
+        data generated from this SCM (if generated, else None)
+    init_type : string
+        Method for generating the adjacency matrix 
+    style : string
+        SCM generation strategy
+    shape : tuple
+        (N, N, tau_max+1) = A.shape
 
-    Class Methods and Constants
-    ___________________________
+    Class Constants
+    _______________
     AXIS_LABELS : dictionary
-        names of the dimensions of the adjacency array and the dimension index.
+        names of the dimensions of the adjacency array and the dimension index
     graph_types_ : list
-        accepted options for INIT_TYPE during tsCausalModel generation / initialization
+        accepted options for INIT_TYPE during tsCAUSALMODEL generation/initialization
     generation_options_ : list
         accepted options for STYLE in GEN_COEFFICIENTS()
-    specified : shortcut for initializing tsCausalModels from a specified adjacency array
-    gen_dataset : wrapper function for generating a large amount
-                  of random data and associated ground-truth SCMs.
+
+    Initialization Options
+    ______________________
+    __init__ : see below
+    specified : Class Method shortcut for initializing a tsCausalModel from a 
+                specified adjacency array
+    from_tigramite : Class Method shortcut for initializing a tsCausalModel from
+                     a tigramite Graphs object or graph array
+
+    Other Class Methods
+    ___________________
+    gen_dataset : wrapper function for generating a large amount of random data 
+                  and associated ground-truth time series SCMs.
 
     Adjacency Matrix Manipulation Functions
     _______________________________________
     MAGIC FUNCTIONS
-    G[i,j] : G.A[i,j] (can retrieve and set values this way)
-    G == G' : G.A == G'.A
-    abs(G) : returns a new tsCAUSALMODEL with G'.A = abs(G.A)
-    the following functions may take 2 tsCAUSALMODELs or a tsCAUSALMODEL and a float.
-    +, -, *, /, ** : Returns a new tsCAUSALMODEL. 
-    +=, -=, *=, /=, **= : Modifies the tsCAUSALMODEL in place.
+    G[i,j] : float
+        G.A[i,j] (can retrieve and set values this way)
+    abs(G) : CAUSALMODEL
+        returns a new CAUSALMODEL with G'.A = abs(G.A)
+    G == G' : boolean
+        returns whether G and G' are equivalent graphs or SCMs given 
+        indistinguishable nodes
+    The following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float:
+    +, -, *, /, ** : Returns a new CAUSALMODEL
+    +=, -=, *=, /=, **= : Modifies the CAUSALMODEL in place
+    
     NUMPY FUNCTIONS 
-    sum, any, inv : takes a tsCAUSALMODEL and returns an array or value
-    triu : returns a new tsCAUSALMODEL
-    i_triu : modifies the tsCAUSALMODEL in place
+    sum, any, inv : takes a CAUSALMODEL and returns an array or value
+    triu : returns a new CAUSALMODEL
+    i_triu : modifies the CAUSALMODEL in place
     """
     AXIS_LABELS = CausalModel.AXIS_LABELS
     AXIS_LABELS['time'] = 2
     graph_types_ = CausalModel.graph_types_ + ['no_feedback']
-    generation_options_ = CausalModel.generation_options_[:2] #UUMC and unit-variance-noise
+    generation_options_ = CausalModel.generation_options_[:2] #UUMC and UVN
     
     def __init__(self, N, tau_max, 
                  init_type='ER', p=.5, p_auto=.8,
@@ -830,7 +891,7 @@ class tsCausalModel(CausalModel):
         labels : list of strings (deault: None)
             Names of the random variables during specified initialization.
         topo_order : np.array of length N (default: None)
-            Topological order for specified generation.
+            Topological order for specified initialization.
         """
         self.tau_max = tau_max
         self.lags = range(self.tau_max+1)
@@ -843,11 +904,14 @@ class tsCausalModel(CausalModel):
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
-        '''Helper function for initializing a tsCAUSALMODEL from a specified adjacency/coefficient matrix'''
+        '''Helper function for initializing a tsCAUSALMODEL from a specified 
+        adjacency/coefficient matrix'''
         if len(init.shape)==2:
             init = init.reshape(init.shape+(1,)) #assuming tau_max=0
-        return cls(init.shape[cls.AXIS_LABELS['source']], init.shape[cls.AXIS_LABELS['time']]-1, 
-                   init_type='specified', init=init, labels=labels, noise=noise)
+        return cls(init.shape[cls.AXIS_LABELS['source']], 
+                   init.shape[cls.AXIS_LABELS['time']]-1, 
+                   init_type='specified', init=init, 
+                   labels=labels, noise=noise)
 
     @classmethod
     def from_tigramite(cls, tgG):
@@ -858,25 +922,36 @@ class tsCausalModel(CausalModel):
             tgA = tgG
         else:
             if tgG.graph_type!='dag':
-                raise ValueError("can only interpret tigramite dags, not {}".format(tsG.graph_type))
+                raise ValueError(
+                    "can only interpret tigramite dags, not {}".format(tsG.graph_type))
             tgA = tgG.graph
         return cls.specified(from_tig(tgA))
     
     @classmethod
-    def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, verbose=False, text_trap=None):
+    def gen_dataset(cls, N, tau_max, T, B, init_args={}, coef_args={}, time_limit=5, 
+                    verbose=False, text_trap=None):
         r'''Method for generating data from many random SCMs.
     
         Parameters
         _________
-        N, tau_max, init_args: parameters for graph initialization
+        N : int
+            Number of nodes to include in a graph
+        tau_max: int 
+            Maximum time-lag
         T : int, optional (Default: 1000)
             Number of observations in each generated time series
         B : int, optional (Default: 100)
             Number of SCMs (and associated data) to generate
-        coef_args : dictionary of inputs to gen_coefficients
+        init_args : dict, optional (Default: {})
+            additional arguments for graph initialization
+        coef_args : dictionary, optional (Default: {})
+            additional arguments for to gen_coefficients
         time_limit : int, optional (Default: 5)
             Maximum number of seconds to spend on each attempt at generating an SCM
-        verbose : whether to print all output
+        verbose : boolean, optional (Default: False)
+            whether to print all output
+        text_trap : StringIO, optional (Default: None)
+            StringIO to capture suppressed printed output for later viewing
         '''
         error_types = [ConvergenceError, UnstableError, GenerationError, TimeoutException]
         errors = {k: 0 for k in error_types}
@@ -891,7 +966,8 @@ class tsCausalModel(CausalModel):
             try:
                 with _time_lim(time_limit):
                     with redirect_stdout(text_trap):
-                        g = cls(N=N, tau_max=tau_max, **init_args).gen_coefficients(**coef_args)
+                        g = cls(N=N, tau_max=tau_max, 
+                                **init_args).gen_coefficients(**coef_args)
                         g.gen_data(T)
             except tuple(errors.keys()) as E:
                 errors[type(E)]+=1
@@ -900,8 +976,12 @@ class tsCausalModel(CausalModel):
 
         if all_errors > 0:
             num_errors = len(errors.keys())
-            _clear_progress_message("Discarded {} system{} due to the following errors: ".format(all_errors, 's' if all_errors>1 else ''))
-            print((", and ".join([(", ".join(["{} {}{}"]*(num_errors-1))), "{} {}{}"])).format(*sum(((v, k.__name__, 's' if v!=1 else '') for k, v in errors.items()),())))
+            _clear_progress_message(
+                "Discarded {} system{} due to the following errors: ".format(
+                    all_errors, 's' if all_errors>1 else '')
+            )
+            print((", and ".join([(", ".join(["{} {}{}"]*(num_errors-1))), "{} {}{}"])).format(
+                *sum(((v, k.__name__, 's' if v!=1 else '') for k, v in errors.items()),())))
         else:
             _progress_message("{:.0%} completed ({} discarded)\n".format(
                                 len(Gs)/B, all_errors))
@@ -917,6 +997,7 @@ class tsCausalModel(CausalModel):
     def get_adjacencies(self, include_auto=True):
         r'''Returns an N x N summary-graph adjacency matrix.
         The i,j-th entry represents an effect of X_i on X_j.
+        INCLUDE_AUTO=False removes self-dependencies.
         '''
         adj = self.any(axis='time')
         if not include_auto:
@@ -959,13 +1040,13 @@ class tsCausalModel(CausalModel):
         collected_cycles, c_anc = self.cycle_ancestry()
         num_ancestors = self.sum(matrix=c_anc, axis='source')
         cycle_order = np.argsort(num_ancestors)
-        summary_order = [self.topo_order[np.sort(np.concatenate([self.order(e)
-                                                                 for e in collected_cycles[i]]))]
-                         for i in cycle_order]
+        summary_order = [self.topo_order[np.sort(np.concatenate(
+            [self.order(e) for e in collected_cycles[i]]))] for i in cycle_order]
         self.topo_order = np.concatenate(summary_order)
         self.components = summary_order
 
-    def gen_coefficients(self, style='UUMC', convergence_attempts=10):
+    def gen_coefficients(self, style='UUMC', convergence_attempts=10): 
+        #TODO add an optional time-limit for this
         r'''Generate a random SCM from a causal graph.
 
         Parameters
@@ -1050,7 +1131,8 @@ class tsCausalModel(CausalModel):
                 continue
             self.data = TS
             return self.data
-        raise GenerationError("generated data has variance too var from 1: {} (tried {}x)".format(V, generation_attempts))
+        raise GenerationError("generated data has variance too var from 1: {} " + 
+                              "(tried {}x)".format(V, generation_attempts))
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
@@ -1069,9 +1151,12 @@ class tsCausalModel(CausalModel):
 
     #Communication with other packages
     def _check_static(self, pkg):
+        '''Used to prevent trying to convert a tsCausalModel with tau_max > 0 to a static graph type'''
         if self.tau_max>0:
-            raise ValueError("Cannot transport tsCausalModel with tau_max = {} to {}".format(self.tau_max, pkg))
+            raise ValueError(
+                "Cannot transport tsCausalModel with tau_max = {} to {}".format(self.tau_max, pkg))
     def to_tigramite(self, verbosity=0):
+        '''Returns a tigramite Graphs object consistent with the current adjacency matrix'''
         tg = importlib.__import__('tigramite.graphs')
         to_tig = np.vectorize(lambda x: '-->' if x>0 else '<--' if x<0 else '')
         A_ = (self.A != 0)*1
@@ -1088,7 +1173,6 @@ class tsCausalModel(CausalModel):
     def _make_random(self, p):
         if self.p_auto is None:
             self.p_auto=p
-        #if self.init_type=='AR(1)':
             
         #helper function definitions
         def adjust_p(p, tm):
@@ -1105,7 +1189,7 @@ class tsCausalModel(CausalModel):
                 self.i_triu()
 
     #gen_coefficients helper functions
-    #_reset_adjaceny_matrix, _reset_s2, _re_sort
+    #_reset_adjaceny_matrix, _reset_s, _re_sort
     def _reset_cov(self):
         if self.style!='unit-variance-noise':
             RHOs = (np.ones((self.N, self.N, 2*self.tau_max+1))*np.nan).astype(object)
@@ -1349,7 +1433,7 @@ class tsCausalModel(CausalModel):
             raise ConvergenceError("covariance matrix not positive semi-definite")
         #self.s = np.divide(((1-r**2)*Bps)**.5,Cs)#multiplier_
         if (self.s>1).any():
-            raise ConvergenceError("Converged Cs produced s2>1: r={}, Cs={}, s2={}".format(r, Cs, self.s))
+            raise ConvergenceError("Converged Cs produced s>1: r={}, Cs={}, s={}".format(r, Cs, self.s))
         self.cov = self.cov.astype(float)
         if (np.abs(self.cov)>1).any():
             raise ConvergenceError("Converged RHOs are sometimes > 1! {}".format(self.cov))
@@ -1391,10 +1475,13 @@ class tsCausalModel(CausalModel):
                 new_msg = "discarded {} solution{} that did not converge".format(
                     discarded_c, 's' if discarded_c>1 else '')
             elif discarded_c == 0:
-                new_msg = "discarded {} unstable solution{} and {} solution{} producing a covariance matrix that was not positive semi-definite".format(
-                    discarded_u, 's' if discarded_u!=1 else '', discarded_psd, 's' if discarded_psd!=1 else '')
+                new_msg = "discarded {} unstable solution{} and {} solution{} producing a " + 
+                "covariance matrix that was not positive semi-definite".format(
+                    discarded_u, 's' if discarded_u!=1 else '', 
+                    discarded_psd, 's' if discarded_psd!=1 else '')
             else:
-                new_msg = "discarded {} solutions: {} unstable, {} producing a non-positive semi-definite covariance matrix, and {} that did not converge".format(
+                new_msg = "discarded {} solutions: {} unstable, {} producing a " + 
+                "non-positive semi-definite covariance matrix, and {} that did not converge".format(
                     discarded_u+discarded_c+discarded_psd, discarded_u, discarded_psd, discarded_c)
         _clear_progress_message(new_msg)
 
@@ -1421,6 +1508,9 @@ class tsCausalModel(CausalModel):
         return np.array(["Lag {}".format(i) for i in self.lags])
     def _get_coefficients(self, i, j):
         return self[i,j]
+    def _ij_style(self, ref, sig):
+        rad = sig*.4*4/self.N
+        return "arc3,rad={}".format(rad)
 
     #Magic Functions
     def __eq__(self, G):
@@ -1429,7 +1519,3 @@ class tsCausalModel(CausalModel):
             and self.tau_max==G.tau_max 
             and super().__eq__(G)
         )
-
-    def _ij_style(self, ref, sig):
-        rad = sig*.4*4/self.N
-        return "arc3,rad={}".format(rad)
