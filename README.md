@@ -16,7 +16,7 @@ To generate random data ([example](examples/example.ipynb)):
    * randomly using [Erdös-Rényi sampling](https://www.degruyter.com/document/doi/10.1515/9781400841356.38/pdf?licenseType=restricted)
    * from a user-provided array where $a_{ji}=1 \Leftrightarrow X_j \rightarrow X_i$. For time series, $a_{ji\tau}=1 \Leftrightarrow X_j(t-\tau)\rightarrow X_i(t)$.
 2. Call `gen_coefficients()` on the CausalModel using the options from the table above. This sets the coefficient matrix `A` and the noise vector `s`. (Time series UUMC SCM generation is available, but under development.)
-3. Call `gen_data()` on the CausalModel, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](Data.py)) which is also stored in the `data` attribute of the CausalModel.
+3. Call `gen_data()` on the CausalModel, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](UUMCdata/Data.py)) which is also stored in the `data` attribute of the CausalModel.
 
 [Var-](https://doi.org/10.48550/arXiv.2102.13647) and [R2-](https://proceedings.neurips.cc/paper_files/paper/2023/file/027e86facfe7c1ea52ca1fca7bc1402b-Paper-Conference.pdf)sortability can be examined by calling `sortability()` on the CausalModel. Large datasets over multiple SCMs can be generated using `CausalModel.gen_dataset()`, and [AnalysisPlotting.py](examples/AnalysisPlotting.py) and [UUMC.ipynb](examples/UUMC.ipynb) contain code that can be used to re-create figures from the UUMC paper.
 
