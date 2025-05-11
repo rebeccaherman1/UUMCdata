@@ -25,7 +25,6 @@ classifiers = [
 dependencies = [
   "numpy",
   "sympy",
-  "io",
   "contextlib",
   "warnings",
   "copy",
@@ -40,4 +39,4 @@ dependencies = [
   "pandas",
 ]
 readme = "README.md"
-version = "0.2"
+version = "0.3"
