@@ -25,18 +25,10 @@ classifiers = [
 dependencies = [
   "numpy",
   "sympy",
-  "contextlib",
-  "warnings",
-  "copy",
-  "time",
   "matplotlib",
-  "re",
   "daosim",
-  "importlib",
-  "sys",
-  "signal",
   "seaborn",
   "pandas",
 ]
 readme = "README.md"
-version = "0.3"
+version = "0.4"
