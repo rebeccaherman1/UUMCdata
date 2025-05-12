@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "numpy",
+  "mpmath",
   "sympy",
   "matplotlib",
   "daosim",
@@ -31,4 +32,4 @@ dependencies = [
   "pandas",
 ]
 readme = "README.md"
-version = "0.4"
+version = "0.5"
