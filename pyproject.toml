@@ -26,10 +26,10 @@ dependencies = [
   "numpy",
   "mpmath",
   "sympy",
-  "matplotlib",
+  "matplotlib", #==3.8.4
   "daosim",
   "seaborn",
   "pandas",
 ]
 readme = "README.md"
-version = "0.7"
+version = "0.11"
