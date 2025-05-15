@@ -807,7 +807,7 @@ class CausalModel(object):
                             rep, ri, r = make_table_contents(table_id, summary_edges)
             plot_table(table_id, rep, ri, h)
                             
-        return "CausalModel {}".format(id(self))
+        return self.__str__()#"CausalModel {}".format(id(self))
 
     def __str__(self):
         if self.style==None: #syntax inspired by graphical_models
@@ -1588,3 +1588,6 @@ class tsCausalModel(CausalModel):
             and self.tau_max==G.tau_max 
             and super().__eq__(G)
         )
+
+    def __str__(self):
+        return "tsCausalModel {}".format(id(self))
