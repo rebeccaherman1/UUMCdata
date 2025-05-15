@@ -199,7 +199,7 @@ class CausalModel(object):
                     ss=ss[1:-1]
                 l = n+_unicode_subscript(ss)
             self.print_labels += [l]
-        self.print_labels = np.array(print_labels)
+        self.print_labels = np.array(self.print_labels)
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
