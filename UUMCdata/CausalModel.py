@@ -41,9 +41,9 @@ class CausalModel(object):
     be created using magic functions. 
     
     Attributes
-    _______________________________
+    __________
     N : int
-        Number of random variables
+        Number of vertices / random variables
     variables : iterable 
         iterable over variable indices
     labels : list of strings
@@ -82,9 +82,9 @@ class CausalModel(object):
     __init__ : see below
     specified : Class Method shortcut for initializing a CAUSALMODEL from a 
                 specified adjacency array
-    from_causallearn :
-    from_networkx    : Class Method shortcuts for initializing a CAUSALMODEL 
-    from_causaldag   : from other packages
+    from_causallearn :  / Class Method shortcuts
+    from_networkx    : (  for initializing a CAUSALMODEL 
+    from_causaldag   :  \ from other packages
 
     Other Class Methods
     ___________________
@@ -124,8 +124,10 @@ class CausalModel(object):
     def __init__(self, N, init_type='ER', p=.5, 
                  init=None, noise=None, labels=None): 
         """
-        Optional Parameters
-        ___________________
+        Parameters
+        __________
+        N : int
+            Number of vertices
         init_type : string (default: 'ER')
             Method for generating the adjacency matrix. Options include:
                 'connected': a fully-connected acyclic time series DAG
@@ -183,7 +185,13 @@ class CausalModel(object):
     @classmethod
     def specified(cls, init, noise=None, labels=None):
         '''Helper function for initializing a CAUSALMODEL from a specified 
-        adjacency/coefficient matrix'''
+        adjacency/coefficient matrix.
+        
+        Parameters
+        __________
+        init : N x N np.array of floats (Default: None)
+            Adjacency matrix for specified initialization. If the entries are 
+            not 1.0 and 0.0, then values are interpreted as causal coefficients'''
         return cls(init.shape[cls.AXIS_LABELS['source']], 
                    init_type='specified', init=init, labels=labels, noise=noise)
 
@@ -218,7 +226,25 @@ class CausalModel(object):
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
         '''Generate a DATASET with data generated from B SCMs with N variables 
-        each and O (for 'observations') samples.'''
+        each and O (for 'observations') samples.
+        
+        Parameters
+        __________
+        N : int
+            Number of vertices
+        O : int
+            Number of samples
+        B : int
+            Number of SCMs
+        init_args : dictionary (default: empty)
+            additional arguments for CausalModel instantiation
+            may include keys in ['init_type', 'p', 'init', 'noise', 'labels']
+        coef_args : dictonary (default: empty)
+            additional arguments for CausalModel.gen_coefficients()
+            may include keys in ['style', 'gen_args']
+        every : int (default: 20)
+            The progress message is updated every time this many CausalModels are generated.
+        '''
         Gs = []
         for i in range(B):
             if len(Gs)%every==0:
@@ -253,7 +279,7 @@ class CausalModel(object):
         return all_paths
     def select_vars(self, V, A=None):
         r'''Subset and/or reorder the adjacency array or an alternative array A
-        via indices V'''
+        via indices V, where V is a list of integers'''
         if A is None:
             A = self.A
         return A[V,:][:,V]
@@ -425,7 +451,7 @@ class CausalModel(object):
         if n_paths == 0:
             return 0.5
         else:
-            return n_correctly_ordered_paths / n_paths
+            return float(n_correctly_ordered_paths / n_paths)
     
     #Initialization Helper Functions
     def _rand_edges(self, p, size=None):
@@ -664,7 +690,7 @@ class CausalModel(object):
             digits_ = 0
             valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
             for digit_type in valid_digits:
-                digits_ += len(re.findall(digit_type,label))
+                digits_ += max(len(re.findall(digit_type,label)),2)
             return digits_
         def plot_table(table_id, rep, ri, h):
             cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
@@ -751,7 +777,7 @@ class CausalModel(object):
                 for j in self.variables:
                     if S[i,j]!=0:
                         add_edge(i, j, artists, first_ax)
-                        ri[r] = "{}-->{}".format(i,j)
+                        ri[r] = "{}-->{}".format(self.labels[i],self.labels[j])
                         rep[r,:]=np.array([str(round(a,3)) for a in self._get_coefficients(i, j)])
                         if self.order(j)<=self.order(i):
                             rep[r,0]=np.nan
@@ -865,8 +891,12 @@ class tsCausalModel(CausalModel):
                  init_type='ER', p=.5, p_auto=.8,
                  init=None, noise=None, labels=None):
         """
-        Optional Parameters
-        ___________________
+        Parameters
+        __________
+        N : int
+            Number of random variables
+        tau_max : int
+            Maximum delay between a cause and its effect
         init_type : string (default: 'ER')
             Method for generating the adjacency matrix. Options include:
                 'connected': a fully-connected acyclic time series DAG
