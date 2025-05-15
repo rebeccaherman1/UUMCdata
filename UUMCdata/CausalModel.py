@@ -186,7 +186,7 @@ class CausalModel(object):
 
         #for rendering automatic labels in stdout
         self.print_labels = []
-        for l in G.labels:
+        for l in self.labels:
             if l[0]=='$' and l[-1]=='$':
                 l = l[1:-1]
             if '_' in l:
