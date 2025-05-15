@@ -25,10 +25,14 @@ print_labels = []
 
 from daosim import corr
 
-#user-available helper function
+#helper functions
 def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
     return M * (np.diag(np.diag(M))==0)
+def _unicode_subscript(ss):
+    '''Assists in rendering vertex labels'''
+    digit_names = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE']
+    return ''.join([unicodedata.lookup("SUBSCRIPT "+digit_names[int(s)]) for s in ss])
 
 class CausalModel(object):
     r"""
@@ -193,7 +197,7 @@ class CausalModel(object):
                 n,ss = l.split('_')
                 if ss[0]=='{' and ss[-1]=='}':
                     ss=ss[1:-1]
-                l = n+self._unicode_subscript(ss)
+                l = n+_unicode_subscript(ss)
             self.print_labels += [l]
         self.print_labels = np.array(print_labels)
 
@@ -817,7 +821,7 @@ class CausalModel(object):
             for v in self.topo_order:
                 Acur = self[:,v]
                 active = Acur.astype(bool)
-                U = 'U'+self._unicode_subscript(str(v))
+                U = 'U'+_unicode_subscript(str(v))
                 to_print+=['='.join([self.print_labels[v],'+'.join(list(filter(None,[
                     ''.join(
                         str(s)+str(round(a,2))+str(x) for s, a, x in zip(
@@ -827,10 +831,6 @@ class CausalModel(object):
                     f'{U},'+'\t'*(self.N-1-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
                 ])))])]
             return '\n'.join(to_print)
-
-    def _unicode_subscript(ss):
-        digit_names = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE']
-        return ''.join([unicodedata.lookup("SUBSCRIPT "+digit_names[int(s)]) for s in ss])
 
 class tsCausalModel(CausalModel):
     r"""
