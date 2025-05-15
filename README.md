@@ -11,14 +11,14 @@ Our work focuses on generation of linear additive Gaussian Structural Causal Mod
 | [50-50](https://proceedings.mlr.press/v177/squires22a.html) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, data for each variable is generated first without noise, then the causal coefficients and data are scaled down by $\sqrt{2}$ times the sample standard deviation to have a variance of 1/2, and noise with variance 1/2 is added before moving on to the next variable in the topological order. |
 | [DaO](https://doi.org/10.48550/arXiv.2405.13100) | DAG Adaptation of the Onion Method. |
                   
-To generate random data ([example](examples/example.ipynb)):
-1. Initialize a graph in a `CausalModel` or `tsCausalModel` object ([CausalModel.py](UUMCdata/CausalModel.py)). This can be done:
+To generate random data ([example](https://github.com/Berlin-Office/UUMCdata/blob/main/examples/example.ipynb)):
+1. Initialize a graph in a `CausalModel` or `tsCausalModel` object ([CausalModel.py](https://github.com/Berlin-Office/UUMCdata/blob/main/UUMCdata/CausalModel.py)). This can be done:
    * randomly using [Erdös-Rényi sampling](https://www.degruyter.com/document/doi/10.1515/9781400841356.38/pdf?licenseType=restricted)
    * from a user-provided array where $a_{ji}=1 \Leftrightarrow X_j \rightarrow X_i$. For time series, $a_{ji\tau}=1 \Leftrightarrow X_j(t-\tau)\rightarrow X_i(t)$.
 2. Call `gen_coefficients()` on the CausalModel using the options from the table above. This sets the coefficient matrix `A` and the noise vector `s`. (Time series UUMC SCM generation is available, but under development.)
-3. Call `gen_data()` on the CausalModel, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](UUMCdata/Data.py)) which is also stored in the `data` attribute of the CausalModel.
+3. Call `gen_data()` on the CausalModel, providing the number of samples. This returns a `Data` or `TimeSeires` object ([Data.py](https://github.com/Berlin-Office/UUMCdata/blob/main/UUMCdata/Data.py)) which is also stored in the `data` attribute of the CausalModel.
 
-[Var-](https://doi.org/10.48550/arXiv.2102.13647) and [R2-](https://proceedings.neurips.cc/paper_files/paper/2023/file/027e86facfe7c1ea52ca1fca7bc1402b-Paper-Conference.pdf)sortability can be examined by calling `sortability()` on the CausalModel. Large datasets over multiple SCMs can be generated using `CausalModel.gen_dataset()`, and [AnalysisPlotting.py](examples/AnalysisPlotting.py) and [UUMC.ipynb](examples/UUMC.ipynb) contain code that can be used to re-create figures from the UUMC paper.
+[Var-](https://doi.org/10.48550/arXiv.2102.13647) and [R2-](https://proceedings.neurips.cc/paper_files/paper/2023/file/027e86facfe7c1ea52ca1fca7bc1402b-Paper-Conference.pdf)sortability can be examined by calling `sortability()` on the CausalModel. Large datasets over multiple SCMs can be generated using `CausalModel.gen_dataset()`, and [AnalysisPlotting.py](https://github.com/Berlin-Office/UUMCdata/blob/main/examples/AnalysisPlotting.py) and [UUMC.ipynb](https://github.com/Berlin-Office/UUMCdata/blob/main/examples/UUMC.ipynb) contain code that can be used to re-create figures from the UUMC paper.
 
 ## Citations
 Please cite the following papers depending on which method you use:

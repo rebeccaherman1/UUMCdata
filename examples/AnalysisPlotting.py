@@ -1,4 +1,4 @@
-from CausalModel import *
+from UUMCdata.CausalModel import *
 import scipy.stats
 
 class SortabilityPlotting():
