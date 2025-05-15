@@ -20,6 +20,8 @@ import importlib
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
 import re
+import unicodedata
+print_labels = []
 
 from daosim import corr
 
@@ -181,6 +183,19 @@ class CausalModel(object):
                 self._make_random(p)
             #randomize the order of appearance of the variables
             self.shuffle()
+
+        #for rendering automatic labels in stdout
+        self.print_labels = []
+        for l in G.labels:
+            if l[0]=='$' and l[-1]=='$':
+                l = l[1:-1]
+            if '_' in l:
+                n,ss = l.split('_')
+                if ss[0]=='{' and ss[-1]=='}':
+                    ss=ss[1:-1]
+                l = n+self._unicode_subscript(ss)
+            self.print_labels += [l]
+        self.print_labels = np.array(print_labels)
 
     @classmethod
     def specified(cls, init, noise=None, labels=None):
@@ -690,8 +705,8 @@ class CausalModel(object):
             digits_ = 0
             valid_digits = ['[0-9]', '[A-Z]', '[a-z]']
             for digit_type in valid_digits:
-                digits_ += max(len(re.findall(digit_type,label)),2)
-            return digits_
+                digits_ += len(re.findall(digit_type,label))
+            return max(digits_,2)
         def plot_table(table_id, rep, ri, h):
             cs = [['0.8']*rep.shape[1],['1']*rep.shape[1]]*((rep.shape[0])//2)
             if rep.shape[0]%2==1:
@@ -788,10 +803,34 @@ class CausalModel(object):
                             rep, ri, r = make_table_contents(table_id, summary_edges)
             plot_table(table_id, rep, ri, h)
                             
-        return str(self)
+        return "CausalModel {}".format(id(self))
 
     def __str__(self):
-        return "CausalModel {}".format(id(self))
+        if self.style==None: #syntax inspired by graphical_models
+            return ''.join(
+                ['|'.join(list(filter(None,[
+                    self.print_labels[v],
+                    ','.join(self.print_labels[self[:,v].astype(bool)])
+                ]))).join(['[',']']) for v in self.topo_order])
+        else:
+            to_print = []
+            for v in self.topo_order:
+                Acur = self[:,v]
+                active = Acur.astype(bool)
+                U = 'U'+self._unicode_subscript(str(v))
+                to_print+=['='.join([self.print_labels[v],'+'.join(list(filter(None,[
+                    ''.join(
+                        str(s)+str(round(a,2))+str(x) for s, a, x in zip(
+                            ['+' if aij >= 0 else '' for aij in Acur[active]],
+                            Acur[active],
+                            self.print_labels[active])),
+                    f'{U},'+'\t'*(self.N-1-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
+                ])))])]
+            return '\n'.join(to_print)
+
+    def _unicode_subscript(ss):
+        digit_names = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE']
+        return ''.join([unicodedata.lookup("SUBSCRIPT "+digit_names[int(s)]) for s in ss])
 
 class tsCausalModel(CausalModel):
     r"""
