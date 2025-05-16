@@ -30,20 +30,20 @@ def remove_diagonal(M):
     '''removes the diagonal from a 2D array M'''
     return M * (np.diag(np.diag(M))==0)
 def _unicode_subscript(ss):
-    '''Assists in rendering vertex labels'''
+    '''Assists in rendering vertex labels with subscripts'''
     digit_names = ['ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE']
     return ''.join([unicodedata.lookup("SUBSCRIPT "+digit_names[int(s)]) for s in ss])
 
 class CausalModel(object):
     r"""
     Data-generation object, and methods for creating and manipulating them.
-    - Always contains a causal graph with adjacencies self.get_adjacencies() 
+    - Always contains a causal graph with adjacencies `self.get_adjacencies()` 
       where a_{ji}=1 <=> X_j -> X_i. 
-    - Becomes a linear additive Gaussian SCM after calling GEN_COEFFICIENTS. 
-      Causal coefficients are given by self.A and noise standard deviations are 
-      given by self.s. 
-    - May also hold generated data after calling GEN_DATA. 
-    Adjacency/coefficient matrices can be manipulated and new CAUSALMODELs can 
+    - Becomes a linear additive Gaussian SCM after calling `self.gen_coefficients(...)`. 
+      Causal coefficients are given by `self.A` and noise standard deviations are 
+      given by `self.s`. 
+    - May also hold generated data after calling `self.gen_data(...)`. 
+    Adjacency/coefficient matrices can be manipulated and new `CausalModel`s can 
     be created using magic functions. 
     
     Attributes
@@ -53,7 +53,10 @@ class CausalModel(object):
     variables : iterable 
         iterable over variable indices
     labels : list of strings
-        Names of the variables
+        Names of the variables (can use Latex math notation).
+    print_labels : list of strings
+        Automatically generated; used for printing to stdout.
+        Removes `$` from math notation and interprets subscripts in unicode.
     A : (N x N) np.array of floats
         A[i,j] is the effect of X_i on X_j.
         When entries are 0.0 and 1.0, this is an adjacency matrix.
@@ -422,7 +425,7 @@ class CausalModel(object):
         new_order = np.arange(self.N)
         np.random.shuffle(new_order)
         self.A = self.select_vars(new_order)
-        self.topo_order = np.argsort(new_order)
+        self.topo_order = np.argsort(new_order)[self.topo_order]
         return
 
     #user-available analysis functions
@@ -621,15 +624,15 @@ class CausalModel(object):
     def __setitem__(self, tpl, v):
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
+        STO = self.deduce_topo_order(modify=False)
+        GTO = G.deduce_topo_order(modify=False)
         return (
             isinstance(G, CausalModel) 
-            and self.N==G.N
-            and (self.select_vars(self.deduce_topo_order(modify=False))==
-                 G.select_vars(G.deduce_topo_order(modify=False))).all()
+            and self.N==G.N                                                #check N
+            and (self.select_vars(STO)==G.select_vars(GTO)).all()
             and (((self.s is None) and (G.s is None))
                  or (((self.s is not None) and (G.s is not None))
-                     and (self.s[self.deduce_topo_order(modify=False)]==
-                          G.s[self.deduce_topo_order(modify=False)]).all()))
+                     and (self.s[STO]==G.s[GTO]).all()))
         )
     def _pass_on_solo(self, func, axis=None, matrix=None):
         if matrix is None:
