@@ -309,7 +309,7 @@ class CausalModel(object):
     #user-available modification functions
     def gen_coefficients(self, style='UUMC', gen_args={}):
         r'''Creates an SCM from the graph using any STYLE from GENERATION_OPTIONS_:
-            UUMC : Procudes unitless, unrestricted, Markov-consistent SCMs. 
+            UUMC : Produces unitless, unrestricted, Markov-consistent SCMs. 
                    Introduced here, recommended (https://doi.org/10.48550/arXiv.2503.17037)
             unit-variance-noise : Draws coefficients uniformly from [-HIGH, -LOW]U[LOW, HIGH], 
                                   and sets all noise variances to 1. Defaults LOW=.5, HIGH=2. 
@@ -357,7 +357,7 @@ class CausalModel(object):
         elif self.style=='50-50': #SCM modified during GEN_DATA
             self._gen_coefficients_UVN(low=0.25, high=1)
         elif self.style=='DaO': 
-            self.cov, B, self.s = corr(self.A.T)
+            self.cov, B, self.s = corr(self.get_adjacencies().T)
             self.A = B.T
         elif self.style=='iSCM': #SCM modified during GEN_DATA
             self._gen_coefficients_UVN()
