@@ -16,6 +16,7 @@ import warnings
 from copy import deepcopy
 import time
 import importlib
+from itertools import permutations
 
 import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
@@ -411,15 +412,18 @@ class CausalModel(object):
             self._calc_cov()
         return self.data
     def deduce_topo_order(self, modify = True):
-        '''Discovers and sets (or returns) a topological ordering 
-        consistent with the adjacency matrix.'''
+        '''Discovers and sets a topological ordering consistent with the adjacency 
+        matrix when MODIFY=True. Else, it returns a list of all possible topological
+        orderings consistent with the adjacency matrix such that the number of 
+        ancestors strictly increases along the topological order.'''
         anc = self.ancestry()
         num_ancestors = self.sum(matrix=anc, axis='source')
         new_order = np.argsort(num_ancestors)
         if modify:
             self.topo_order = new_order
+            return self
         else:
-            return new_order
+            return [np.array(x) for x in permutations(new_order) if (np.diff(num_ancestors[np.array(x)])>=0).all()]
     def shuffle(self):
         '''Randomly shuffles the order of the variables.'''
         new_order = np.arange(self.N)
@@ -490,7 +494,7 @@ class CausalModel(object):
         assert init.shape==self.shape, ("initialization matrix shape {} "
              "not consistent with expected shape {}").format(init.shape, self.shape)
         self.A = init
-        self.deduce_topo_order()
+        self.deduce_topo_order();
         return
 
     #Communication with other packages
@@ -624,16 +628,20 @@ class CausalModel(object):
     def __setitem__(self, tpl, v):
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
-        STO = self.deduce_topo_order(modify=False)
-        GTO = G.deduce_topo_order(modify=False)
-        return (
-            isinstance(G, CausalModel) 
-            and self.N==G.N                                                #check N
-            and (self.select_vars(STO)==G.select_vars(GTO)).all()
-            and (((self.s is None) and (G.s is None))
-                 or (((self.s is not None) and (G.s is not None))
-                     and (self.s[STO]==G.s[GTO]).all()))
-        )
+        if (isinstance(G, CausalModel) and self.N==G.N #check basics
+            and ((self.s is None) == (G.s is None))): 
+            #all possible topological orders for self
+            possible_orders = self.deduce_topo_order(modify=False)
+            #one possible topolocial order for G
+            GTO = G.deduce_topo_order(modify=False)[0]
+            GA = G.select_vars(GTO)
+            if G.s is not None:
+                Gs = G.s[GT0]
+            for STO in possible_orders:
+                if ((self.select_vars(STO)==GA).all() #compare adjacency matrix
+                    and ((self.s is None) or (self.s[STO]==G.s).all())): #compare noise
+                    return True
+        return False
     def _pass_on_solo(self, func, axis=None, matrix=None):
         if matrix is None:
             matrix=self.A.copy()
