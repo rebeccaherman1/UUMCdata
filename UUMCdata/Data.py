@@ -4,13 +4,14 @@ import seaborn as sns
 from pandas import DataFrame as df
 
 class Data(object):
+    '''TODO add description, fix data labels. add examples to example notebook. add returns to descriptions'''
     AXIS_LABELS = {'variables': 0, 'observations': 1}
     analysis_options = ['var', 'R2']
 
     def __getitem__(self, tpl):
         return self.data.__getitem__(tpl)
         
-    def __init__(self, N, O, labels, data):
+    def __init__(self, N, O, labels, data, print_labels=None):
         s = data.shape
         if (s[self.AXIS_LABELS['variables']]!=N) or (s[self.AXIS_LABELS['observations']]!= O):
             raise ValueError("data must be an N x O array")
@@ -18,6 +19,10 @@ class Data(object):
         self.P = O
         self.labels = labels
         self.data = data
+        if print_labels is None:
+            self.print_labels=self.labels
+        else:
+            self.print_labels=print_labels
         
     def var(self):
         '''Variance of each variable over time'''
@@ -50,14 +55,30 @@ class Data(object):
                 R2s[i] = 1.0 - resid[0]/norm
         return R2s
 
-    def __repr__(self):
+    def _to_dataframe(self, interactive=False):
+        if interactive:
+            labels = self.labels
+        else:
+            labels = self.print_labels
+        return df(self.data.T, columns=self.print_labels)
+
+    def to_dataframe(self):
+        return _to_dataframe(interactive=True)
+
+    def _repr_html_(self):
         sns.set(style='ticks', font_scale=.7)
         g = sns.PairGrid(df({l: self.data[i] for i, l in enumerate(self.labels)}), 
                          diag_sharey=False, height=1, aspect=1.15, layout_pad=0.1)
         g.map_upper(sns.scatterplot, size=.5)
         g.map_lower(sns.kdeplot, fill=True)
         g.map_diag(sns.kdeplot)
-        return "Data {}".format(id(self))
+        return "Data object at {}".format(hex(id(self)))
+
+    def __str__(self):
+        return str(self._to_dataframe())
+
+    def __repr__(self):
+        return "Data object at {}: ".format(hex(id(self)))+'\n'+str(self)
 
 class TimeSeries(Data):
     r""" Time Series Data object.
@@ -119,7 +140,7 @@ class TimeSeries(Data):
     def R2_summary(self, tau_max=None):
         return self.R2(tau_max=tau_max, summary=True)
 
-    def __repr__(self):
+    def _repr_html_(self):
         plt.figure(layout='constrained', figsize=(4,3))
         v = self.var().squeeze()
         vo = np.argsort(v)
@@ -130,10 +151,3 @@ class TimeSeries(Data):
         plt.xlabel("Time")
         plt.ylabel("Standardized Value")
         return "TimeSeries {}".format(id(self))
-
-class DataSet(list):
-    '''List of independently-generated datasets. Avoids printing many datasets.'''
-    def __repr__(self):
-        if len(self)==0:
-            return super().__repr__()
-        return "<List of {} {}{}>".format(len(self), type(self[0]).__name__, 's' if len(self)!=1 else '')

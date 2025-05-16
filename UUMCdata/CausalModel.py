@@ -5,6 +5,8 @@ Gaussian SCM and Data Generation (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 from UUMCdata.ChecksErrors import *
 from UUMCdata.Data import *
+#from ChecksErrors import *
+#from Data import *
 
 import numpy as np
 from sympy import Matrix, Symbol, symbols, re, im, Abs, Float
@@ -22,7 +24,6 @@ import matplotlib.pyplot as plt
 from matplotlib import patches as mpatches
 import re
 import unicodedata
-print_labels = []
 
 from daosim import corr
 
@@ -115,7 +116,7 @@ class CausalModel(object):
     +=, -=, *=, /=, **= : Modifies the CAUSALMODEL in place
     
     NUMPY FUNCTIONS 
-    sum, any, inv : takes a CAUSALMODEL and returns an array or value
+    sum, any, inv, transpose : takes a CAUSALMODEL and returns an array or value
     triu : returns a new CAUSALMODEL
     i_triu : modifies the CAUSALMODEL in place
     """
@@ -190,7 +191,7 @@ class CausalModel(object):
             elif init_type!='connected': #ER or no_feedback
                 self._make_random(p)
             #randomize the order of appearance of the variables
-            self.shuffle()
+            self.shuffle(keep_labels=False);
 
         #for rendering automatic labels in stdout
         self.print_labels = []
@@ -248,8 +249,8 @@ class CausalModel(object):
 
     @classmethod
     def gen_dataset(cls, N, O, B, init_args={}, coef_args={}, every=20):
-        '''Generate a DATASET with data generated from B SCMs with N variables 
-        each and O (for 'observations') samples.
+        '''Returns a list of B initialized CausalModels with N variables 
+        each containing generated data with O (for 'observations') samples.
         
         Parameters
         __________
@@ -267,6 +268,10 @@ class CausalModel(object):
             may include keys in ['style', 'gen_args']
         every : int (default: 20)
             The progress message is updated every time this many CausalModels are generated.
+
+        Returns
+        _______
+        A list of initialized CausalModels with generated data.
         '''
         Gs = []
         for i in range(B):
@@ -276,7 +281,7 @@ class CausalModel(object):
             g.gen_data(O)
             Gs += [g]
         _progress_message("{:.0%} completed\n".format(len(Gs)/B))
-        return DataSet(Gs)
+        return Gs
 
     #User-available retrieval functions
     def get_adjacencies(self, **args):
@@ -369,7 +374,9 @@ class CausalModel(object):
             self._gen_coefficients_UVN(**gen_args)
         return self        
     def gen_data(self, P):
-        '''Generates and returns a dataset with P observations from the current SCM'''
+        '''Generates and returns data with P observations from the current SCM'''
+        if self.style is None:
+            raise ValueError("must call gen_coefficients(...) before calling gen_data(...)")
         
         #calculate noises
         par = self.get_num_parents()
@@ -406,7 +413,7 @@ class CausalModel(object):
             if self.style=='iSCM':
                 rescale_iSCM(i)
         
-        self.data = Data(self.N, P, self.labels, X)
+        self.data = Data(self.N, P, self.labels, X, self.print_labels)
         if self.style in ['50-50', 'iSCM']:
             #recalculate covariance for modified SCMs
             self._calc_cov()
@@ -423,14 +430,21 @@ class CausalModel(object):
             self.topo_order = new_order
             return self
         else:
-            return [np.array(x) for x in permutations(new_order) if (np.diff(num_ancestors[np.array(x)])>=0).all()]
-    def shuffle(self):
-        '''Randomly shuffles the order of the variables.'''
+            return [np.array(x) for x in permutations(new_order) 
+                    if (np.diff(num_ancestors[np.array(x)])>=0).all()]
+    def shuffle(self, keep_labels=True):
+        '''Randomly shuffles the order of the variables. Keeps associatioins to
+        variable lables only if keep_labels is True.'''
         new_order = np.arange(self.N)
         np.random.shuffle(new_order)
         self.A = self.select_vars(new_order)
         self.topo_order = np.argsort(new_order)[self.topo_order]
-        return
+        if keep_labels:
+            self.labels = [str(self.labels[idx]) for idx in new_order]
+            self.print_labels = self.print_labels[new_order]
+        if self.s is not None:
+            self.s = self.s[new_order]
+        return self
 
     #user-available analysis functions
     def sortability(self, func='var', tol=1e-9):
@@ -495,6 +509,8 @@ class CausalModel(object):
              "not consistent with expected shape {}").format(init.shape, self.shape)
         self.A = init
         self.deduce_topo_order();
+        if self.s is not None:
+            style='specified'
         return
 
     #Communication with other packages
@@ -621,7 +637,7 @@ class CausalModel(object):
     def _ij_style(self,ref, sig):
         return "arc3"
 
-    #Magic Functions
+    #Magic and numpy Functions
     #returning a matrix or element
     def __getitem__(self, tpl):
         return self.A.__getitem__(tpl)
@@ -636,10 +652,10 @@ class CausalModel(object):
             GTO = G.deduce_topo_order(modify=False)[0]
             GA = G.select_vars(GTO)
             if G.s is not None:
-                Gs = G.s[GT0]
+                Gs = G.s[GTO]
             for STO in possible_orders:
                 if ((self.select_vars(STO)==GA).all() #compare adjacency matrix
-                    and ((self.s is None) or (self.s[STO]==G.s).all())): #compare noise
+                    and ((self.s is None) or (self.s[STO]==Gs).all())): #compare noise
                     return True
         return False
     def _pass_on_solo(self, func, axis=None, matrix=None):
@@ -656,6 +672,8 @@ class CausalModel(object):
         return self._pass_on_solo(np.any, axis, matrix)
     def inv(self, matrix=None):
         return self._pass_on_solo(np.linalg.inv, matrix=matrix)
+    def transpose(self):
+        return self.A.T
 
     #returning a new CausalModel
     def _pass_on(self, func, other=None):
@@ -713,7 +731,7 @@ class CausalModel(object):
     def __ipow__(self, other):
         return self._i_pass_on(lambda x,y : x**y, other)
 
-    def __repr__(self):
+    def _repr_html_(self):
         '''Displays a summary graph, and a table detailing all adjacencies'''
         #helper function definitions
         def label_len(label):
@@ -789,6 +807,8 @@ class CausalModel(object):
                 mutation_scale=15, color='k', connectionstyle=connectionstyle)
             ax.add_artist(arrow)
 
+        print(self)
+
         S = self.get_adjacencies(include_auto=True)
         summary_edges = np.sum(S)
         DAG_width = 3
@@ -818,7 +838,13 @@ class CausalModel(object):
                             rep, ri, r = make_table_contents(table_id, summary_edges)
             plot_table(table_id, rep, ri, h)
                             
-        return self.__str__()#"CausalModel {}".format(id(self))
+        return "CausalModel at {}".format(hex(id(self)))
+        
+    def __repr__(self):
+        ret = "CausalModel at {}: ".format(hex(id(self)))
+        if self.style is not None:
+            ret += '\n'
+        return ret+str(self)
 
     def __str__(self):
         if self.style==None: #syntax inspired by graphical_models
@@ -839,7 +865,7 @@ class CausalModel(object):
                             ['+' if aij >= 0 else '' for aij in Acur[active]],
                             Acur[active],
                             self.print_labels[active])),
-                    f'{U},'+'\t'*(self.N-1-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
+                    f'{U},'+'\t'*(self.N-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
                 ])))])]
             return '\n'.join(to_print)
 
@@ -1067,7 +1093,7 @@ class tsCausalModel(CausalModel):
                                 len(Gs)/B, all_errors))
         if verbose:
             print(text_trap.read())
-        return DataSet(Gs)
+        return Gs
 
     #User-available retrieval functions
     #order, get_num_parents, ancestry, select_vars
