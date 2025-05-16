@@ -4,19 +4,61 @@ import seaborn as sns
 from pandas import DataFrame as df
 
 class Data(object):
-    '''TODO add description, fix data labels. add examples to example notebook. add returns to descriptions'''
+    '''
+    Data Object. 
+
+    Attributes
+    __________
+    N : int
+        Number of variables
+    P : int
+        Number of observations
+    data : N x P numpy array
+        data, where different rows are different variables and the columns are samples.
+        May be indexed by calling self[i,j].
+    labels : list of strings
+        Names of the variables
+    print_labels : array of strings
+        a version of LABELS that is better for printing to stdout
+
+    Class Constants
+    _______________
+    AXIS_LABELS : dictionary containing the axis index of the 'variables' and 'observations'
+    analysis_options : list of built-in analysis functions
+
+    Analysis Functions
+    __________________
+    var : returns the variance of each variable in an array
+    R2 : returns the R2 regression score of each variable on all the others
+
+    Export Functions
+    ________________
+    to_dataframe : casts the Data object as a pandas DataFrame
+    '''
     AXIS_LABELS = {'variables': 0, 'observations': 1}
     analysis_options = ['var', 'R2']
-
-    def __getitem__(self, tpl):
-        return self.data.__getitem__(tpl)
         
-    def __init__(self, N, O, labels, data, print_labels=None):
+    def __init__(self, N, P, labels, data, print_labels=None):
+        '''
+        Parameters
+        __________
+        N : int
+            Number of variables
+        P : int
+            Number of samples
+        labels : list of strings
+            Names of the variables
+        data : N x P numpy array
+            data, where different rows are different variables and the columns are samples.
+            May be indexed by calling self[i,j].
+        print_labels : array of strings (optional; default = labels)
+            A version of labels that does not require Latex rendering
+        '''
         s = data.shape
         if (s[self.AXIS_LABELS['variables']]!=N) or (s[self.AXIS_LABELS['observations']]!= O):
             raise ValueError("data must be an N x O array")
         self.N = N
-        self.P = O
+        self.P = P
         self.labels = labels
         self.data = data
         if print_labels is None:
@@ -27,12 +69,6 @@ class Data(object):
     def var(self):
         '''Variance of each variable over time'''
         return np.var(self.data, axis=self.AXIS_LABELS['observations'], keepdims=True)
-
-    def _get_regressors(self):
-        return self.data
-
-    def _remove_regressors(self, X, i):
-        return X[np.arange(self.N) != i, :]
         
     def R2(self):
         r'''R2 predictability as detailed in Reisach, Tami, Seiler, Chambaz, and Weichwald (2023). 
@@ -55,6 +91,16 @@ class Data(object):
                 R2s[i] = 1.0 - resid[0]/norm
         return R2s
 
+    def to_dataframe(self):
+        '''Casts the current Data object as a pandas DataFrame'''
+        return _to_dataframe(interactive=True)
+
+    def _get_regressors(self):
+        return self.data
+
+    def _remove_regressors(self, X, i):
+        return X[np.arange(self.N) != i, :]
+
     def _to_dataframe(self, interactive=False):
         if interactive:
             labels = self.labels
@@ -62,8 +108,8 @@ class Data(object):
             labels = self.print_labels
         return df(self.data.T, columns=self.print_labels)
 
-    def to_dataframe(self):
-        return _to_dataframe(interactive=True)
+    def __getitem__(self, tpl):
+        return self.data.__getitem__(tpl)
 
     def _repr_html_(self):
         sns.set(style='ticks', font_scale=.7)
@@ -98,13 +144,20 @@ class TimeSeries(Data):
     _______________
     AXIS_LABELS : dict
         Names of dimensions and their indices
+    analysis_options : list of built-in analysis functions
+
+    Analysis Functions
+    __________________
+    var : returns the variance of each variable in an array
+    R2 : returns the R2 regression score of each variable on all the others
+    R2_summary : regresses each variable on parent processes but not own past
     """
     AXIS_LABELS = Data.AXIS_LABELS
     AXIS_LABELS['time'] = AXIS_LABELS['observations']
     analysis_options = Data.analysis_options + ['R2_summary']
 
-    def __init__(self, N, T, labels, data):
-        super().__init__(N, T, labels, data)
+    def __init__(self, N, T, labels, data, print_labels=None):
+        super().__init__(N, T, labels, data, print_labels=print_labels)
 
     def _get_regressors(self):
         X = self[:,self.tau_max:]

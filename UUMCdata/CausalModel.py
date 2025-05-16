@@ -101,6 +101,30 @@ class CausalModel(object):
     ___________________
     gen_dataset : create many graphs/SCMs with generated data
 
+    SCM Manipulation Functions
+    __________________________
+    IMPORTANT
+    gen_coefficients : turns the CausalModel into an SCM by drawing values for self.A and self.s
+    gen_data : Generates and returns a UUMCdata.Data object with P observations from the
+        current SCM. This data object is also stored in self.data.
+
+    NOT NEEDED, BUT USER AVAILABLE
+    deduce_topo_order : Discovers and sets a topological ordering consistent with the adjacency 
+        matrix or returns a list of all possible topological orderings consistent with the 
+        adjacency matrix such that the number of ancestors strictly increases along the topological order.
+    shuffle : Randomly shuffles the order of the variables. 
+    select_vars : Subset and/or reorder the adjacency array or an alternative array A
+    copy : return deepcopy(self)
+
+    Descriptive Functions
+    _____________________
+    sortability : Calculates var- or R2-sortability of data from an SCM
+    get_adjacencies : Returns an NxN boolean matrix where A[i,j]=True iff X_i --> X_j
+    order : Returns the placement in the topological order of the variable at index i
+    get_num_parents : Returns an np.array of length N containing the number of parent 
+        processes of each variable (in the summary graph)
+    ancestry : Returns an N x N boolean matrix summarizing ancestries in the (summary) graph.
+
     Adjacency Matrix Manipulation Functions
     _______________________________________
     MAGIC FUNCTIONS
