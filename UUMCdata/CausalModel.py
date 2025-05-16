@@ -985,7 +985,7 @@ class tsCausalModel(CausalModel):
     @classmethod
     def from_tigramite(cls, tgG):
         from_tig = np.vectorize(lambda x: (x=='-->')*1.0)
-        if isinstance(tgG, np.ndarray)):
+        if isinstance(tgG, np.ndarray):
             if not ((tgG=='-->') + (tgG=='') + (tgG=='<--')).all():
                 raise ValueError("all edges must be directed: '', '-->', or '<--'")
             tgA = tgG

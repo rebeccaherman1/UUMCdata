@@ -1,10 +1,10 @@
-# UUMC SCM and Data Generation
+# UUMC SCM and Benchmark Data Generation
 Unitless, Unrestricted, Markov-Consistent Random Static (or Time Series, beta) SCM and Data Generation [[paper]](https://doi.org/10.48550/arXiv.2503.17037).
 
 Our work focuses on generation of linear additive Gaussian Structural Causal Models (SCM) given a causal graph. In addition to our proposed approach, our package supports other approaches examined in the UUMC paper for comparison:
 | Method | Description |
 | :-- | :-- |
-| [UUMC](https://doi.org/10.48550/arXiv.2503.17037) | Procudes unitless, unrestricted, Markov-consistent SCMs. Introduced here; default option. |
+| [UUMC](https://doi.org/10.48550/arXiv.2503.17037) | Produces unitless, unrestricted, Markov-consistent SCMs. Introduced here; default option. |
 | [unit-variance-noise](https://proceedings.neurips.cc/paper_files/paper/2018/file/e347c51419ffb23ca3fd5050202f9c3d-Paper.pdf) | Draws coefficients uniformly from [-HIGH, -LOW] U [LOW, HIGH], and sets all noise variances to 1. Defaults LOW=.5, HIGH=2. |
 | [iSCM](https://arxiv.org/abs/2406.11601) | Begins with UVN SCM generation. The SCM is not complete until calling GEN_DATA. During data generation, the structural parameters (and data) for each variable are standardized by the sample standard deviation of the generated data before moving on to the next variable in the topological order. |
 | [IPA](http://jmlr.org/papers/v21/17-123.html) | The structural parameters for each variable are scaled down by the variance the variable would have had if its parents were independent. |
