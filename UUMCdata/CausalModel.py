@@ -3,10 +3,10 @@ Gaussian SCM and Data Generation (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
 
-from UUMCdata.ChecksErrors import *
-from UUMCdata.Data import *
-#from ChecksErrors import *
-#from Data import *
+#from UUMCdata.ChecksErrors import *
+#from UUMCdata.Data import *
+from ChecksErrors import *
+from Data import *
 
 import numpy as np
 from sympy import Matrix, Symbol, symbols, re, im, Abs, Float
@@ -126,8 +126,8 @@ class CausalModel(object):
     sortability : Calculates var- or R2-sortability of data from an SCM
     get_adjacencies : Returns an NxN boolean matrix where A[i,j]=True iff X_i --> X_j
     order : Returns the placement in the topological order of the variable at index i
-    get_num_parents : Returns an np.array of length N containing the number of parent 
-        processes of each variable (in the summary graph)
+    get_num_parents : Returns an np.array of length N containing the number of parents 
+        of each variable (in the summary graph)
     ancestry : Returns an N x N boolean matrix summarizing ancestries in the (summary) graph.
     """
     #constants
@@ -961,10 +961,40 @@ class tsCausalModel(CausalModel):
       Causal coefficients are given by self.A and noise standard deviations are 
       given by self.s. 
     - May also hold generated data after calling GEN_DATA
-    Adjacency matrices can be manipulated and new tsCausalModels can be created 
-    using magic functions. 
+
+    Initialization Parameters
+    __________
+    N : int
+        Number of random variables
+    tau_max : int
+        Maximum delay between a cause and its effect
+    init_type : string (default: 'ER')
+        Method for generating the adjacency matrix. Options include:
+            'connected': a fully-connected acyclic time series DAG
+            'ER': randomly include edges from the connected graph 
+                      such that the probability of a corresponding edge
+                      in the summary graph is p (or p_auto for auto-dependence)
+            'no_feedback': as with 'ER', but the summary graph is also acyclic
+            'disconnected': a graph with no edges
+            'specified': A causal graph with adjacency matrix INIT
+    p : float (Default: 0.5)
+        Probability of a directed causal dependence between distinct variables 
+        during random generation
+    p_auto : float (Default: 0.8)
+        Probability of dependence from a variable's past to its present 
+        during random generation
+    init : N x N x tau_max np.array (Default: None)
+        Adjacency matrix for specified initialization.
+        If the entries are not 1 and 0, 
+        then non-zero values are interpreted as causal coefficients.
+    noise : np.array of length N (Default: None)
+        Noise variances for each random variable for specified initialization.
+    labels : list of strings (deault: None)
+        Names of the random variables during specified initialization.
+    topo_order : np.array of length N (default: None)
+        Topological order for specified initialization.
     
-    Parameters
+    Attributes
     __________
     N : int
         Number of random variables
@@ -972,6 +1002,9 @@ class tsCausalModel(CausalModel):
         iterable over variable indices
     labels : list of strings
         Names of the variables
+    print_labels : list of strings
+        Automatically generated; used for printing to stdout.
+        Removes `$` from math notation and interprets subscripts in unicode.
     tau_max : int
         Maximum delay between a cause and its effect
     lags : iterable 
@@ -1000,18 +1033,8 @@ class tsCausalModel(CausalModel):
     shape : tuple
         (N, N, tau_max+1) = A.shape
 
-    Class Constants
-    _______________
-    AXIS_LABELS : dictionary
-        names of the dimensions of the adjacency array and the dimension index
-    graph_types_ : list
-        accepted options for INIT_TYPE during tsCAUSALMODEL generation/initialization
-    generation_options_ : list
-        accepted options for STYLE in GEN_COEFFICIENTS()
-
-    Initialization Options
-    ______________________
-    __init__ : see below
+    Other Initialization Options
+    ____________________________
     specified : Class Method shortcut for initializing a tsCausalModel from a 
                 specified adjacency array
     from_tigramite : Class Method shortcut for initializing a tsCausalModel from
@@ -1022,24 +1045,24 @@ class tsCausalModel(CausalModel):
     gen_dataset : wrapper function for generating a large amount of random data 
                   and associated ground-truth time series SCMs.
 
-    Adjacency Matrix Manipulation Functions
-    _______________________________________
-    MAGIC FUNCTIONS
-    G[i,j,t] : float
-        G.A[i,j,t] (can retrieve and set values this way)
-    abs(G) : CAUSALMODEL
-        returns a new CAUSALMODEL with G'.A = abs(G.A)
-    G == G' : boolean
-        returns whether G and G' are equivalent graphs or SCMs given 
-        indistinguishable nodes
-    The following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float:
-    *, /, ** : Returns a new CAUSALMODEL
-    *=, /=, **= : Modifies the CAUSALMODEL in place
-    
-    NUMPY FUNCTIONS 
-    sum, any, transpose : takes a CAUSALMODEL and returns an array or value
-    triu : returns a new CAUSALMODEL
-    i_triu : modifies the CAUSALMODEL in place
+    Class Constants
+    _______________
+    AXIS_LABELS : dictionary
+        names of the dimensions of the adjacency array and the dimension index
+    graph_types_ : list
+        accepted options for INIT_TYPE during tsCAUSALMODEL generation/initialization
+    generation_options_ : list
+        accepted options for STYLE in GEN_COEFFICIENTS()
+
+    Descriptive Functions
+    _____________________
+    sortability : Calculates var-, R2-, or R2_summary-sortability of data from an SCM
+    get_adjacencies : Returns an NxN boolean matrix where A[i,j]=True iff 
+                      X_i(t-tau) --> X_j(t) for some tau in [0, tau_max]
+    order : Returns the placement in the topological order of the variable at index i
+    get_num_parents : Returns an np.array of length N containing the number of parent 
+        processes of each variable (in the summary graph)
+    ancestry : Returns an N x N boolean matrix summarizing ancestries in the (summary) graph.
     """
     AXIS_LABELS = CausalModel.AXIS_LABELS
     AXIS_LABELS['time'] = 2
