@@ -3,10 +3,10 @@ Gaussian SCM and Data Generation (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
 
-#from UUMCdata.ChecksErrors import *
-#from UUMCdata.Data import *
-from ChecksErrors import *
-from Data import *
+from UUMCdata.ChecksErrors import *
+from UUMCdata.Data import *
+#from ChecksErrors import *
+#from Data import *
 
 import numpy as np
 from sympy import Matrix, Symbol, symbols, re, im, Abs, Float
