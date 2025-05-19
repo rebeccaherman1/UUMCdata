@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from sympy import Matrix
 
 __all__ = ["_time_lim", "_check_given", "_check_option", "_progress_message", "_clear_progress_message", "_check_vars",
-          "UnstableError", "ConvergenceError", "GenerationError", "OptionError"]
+          "UnstableError", "ConvergenceError", "GenerationError", "TimeoutException", "OptionError"]
 
 #Checks and errors
 class UnstableError(Exception): pass

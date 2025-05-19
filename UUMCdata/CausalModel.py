@@ -45,8 +45,29 @@ class CausalModel(object):
       Causal coefficients are given by `self.A` and noise standard deviations are 
       given by `self.s`. 
     - May also hold generated data after calling `self.gen_data(...)`. 
-    Adjacency/coefficient matrices can be manipulated and new `CausalModel`s can 
-    be created using magic functions. 
+
+    Initialization Parameters
+    _________________________
+    N : int
+        Number of vertices
+    init_type : string (default: 'ER')
+        Method for generating the adjacency matrix. Options include:
+            'connected': a fully-connected acyclic time series DAG
+            'ER': Erdös-Rényi random graph generation. 
+                  Randomly include edges with probability P
+            'disconnected': a graph with no edges
+            'specified': A causal graph with adjacency matrix INIT
+    p : float (Default: 0.5)
+        Probability of an edge during ER graph generation
+    init : N x N np.array of floats (Default: None)
+        Adjacency matrix for specified initialization. If the entries are 
+        not 1.0 and 0.0, then values are interpreted as causal coefficients
+    noise : np.array of length N (Default: None)
+        Noise variances for specified initialization
+    labels : list of strings (deault: None)
+        Names of the random variables during specified initialization
+    topo_order : np.array of length N (default: None)
+        Topological order for specified initialization
     
     Attributes
     __________
@@ -78,19 +99,9 @@ class CausalModel(object):
         SCM generation strategy
     shape : tuple
         (N, N) = A.shape
-
-    Class Constants
-    _______________
-    AXIS_LABELS : dictionary
-        names of the dimensions of the adjacency array and the dimension index
-    graph_types_ : list
-        accepted options for INIT_TYPE during CAUSALMODEL generation/initialization
-    generation_options_ : list
-        accepted options for STYLE in GEN_COEFFICIENTS()
     
-    Initialization Options
-    ______________________
-    __init__ : see below
+    Other Initialization Options
+    ____________________________
     specified : Class Method shortcut for initializing a CAUSALMODEL from a 
                 specified adjacency array
     from_causallearn :  / Class Method shortcuts
@@ -100,21 +111,15 @@ class CausalModel(object):
     Other Class Methods
     ___________________
     gen_dataset : create many graphs/SCMs with generated data
-
-    SCM Manipulation Functions
-    __________________________
-    IMPORTANT
-    gen_coefficients : turns the CausalModel into an SCM by drawing values for self.A and self.s
-    gen_data : Generates and returns a UUMCdata.Data object with P observations from the
-        current SCM. This data object is also stored in self.data.
-
-    NOT NEEDED, BUT USER AVAILABLE
-    deduce_topo_order : Discovers and sets a topological ordering consistent with the adjacency 
-        matrix or returns a list of all possible topological orderings consistent with the 
-        adjacency matrix such that the number of ancestors strictly increases along the topological order.
-    shuffle : Randomly shuffles the order of the variables. 
-    select_vars : Subset and/or reorder the adjacency array or an alternative array A
-    copy : return deepcopy(self)
+    
+    Class Constants
+    _______________
+    AXIS_LABELS : dictionary
+        names of the dimensions of the adjacency array and the dimension index
+    graph_types_ : list
+        accepted options for INIT_TYPE during CAUSALMODEL generation/initialization
+    generation_options_ : list
+        accepted options for STYLE in GEN_COEFFICIENTS()
 
     Descriptive Functions
     _____________________
@@ -124,25 +129,6 @@ class CausalModel(object):
     get_num_parents : Returns an np.array of length N containing the number of parent 
         processes of each variable (in the summary graph)
     ancestry : Returns an N x N boolean matrix summarizing ancestries in the (summary) graph.
-
-    Adjacency Matrix Manipulation Functions
-    _______________________________________
-    MAGIC FUNCTIONS
-    G[i,j] : float
-        G.A[i,j] (can retrieve and set values this way)
-    abs(G) : CAUSALMODEL
-        returns a new CAUSALMODEL with G'.A = abs(G.A)
-    G == G' : boolean
-        returns whether G and G' are equivalent graphs or SCMs given 
-        indistinguishable nodes
-    The following functions may take 2 CAUSALMODELs or a CAUSALMODEL and a float:
-    *, /, ** : Returns a new CAUSALMODEL
-    *=, /=, **= : Modifies the CAUSALMODEL in place
-    
-    NUMPY FUNCTIONS 
-    sum, any, transpose : takes a CAUSALMODEL and returns an array or value
-    triu : returns a new CAUSALMODEL
-    i_triu : modifies the CAUSALMODEL in place
     """
     #constants
     AXIS_LABELS = {'source': 0, 'sink': 1, None:None}
@@ -410,15 +396,11 @@ class CausalModel(object):
             self._gen_coefficients_UVN()
         else: #UVN
             self._gen_coefficients_UVN(**gen_args)
-        return self        
+        return self
     def gen_data(self, P):
         '''Generates and returns a UUMCdata.Data object with P observations from the
         current SCM. This data object is also stored in self.data.'''
-        if self.style is None:
-            if init_type=='specified' and self.s is None:
-                raise ValueError("please set noise standard deviations (self.s) before generating data.")
-            else:
-                raise ValueError("must call gen_coefficients(...) before calling gen_data(...)")
+        self._check_is_SCM()
         
         #calculate noises
         par = self.get_num_parents()
@@ -475,8 +457,9 @@ class CausalModel(object):
             return [np.array(x) for x in permutations(new_order) 
                     if (np.diff(num_ancestors[np.array(x)])>=0).all()]
     def shuffle(self, keep_labels=True):
-        '''Randomly shuffles the order of the variables. Keeps associatioins to
-        variable lables only if keep_labels is True. Returns self.'''
+        '''Randomly shuffles the order of the variables, modifying the CausalModel
+        in place. Keeps associatioins to variable lables only if keep_labels is True. 
+        Returns self.'''
         new_order = np.arange(self.N)
         np.random.shuffle(new_order)
         self.A = self.select_vars(new_order)
@@ -669,6 +652,17 @@ class CausalModel(object):
         self.cov = self._re_sort(loc_cov)
         self.A = self._re_sort(A_loc)
 
+    #gen_data helper functions
+    def is_SCM(self):
+        '''True if self.A and self.s have both been initialized.'''
+        return (self.style is not None) or ((self.init_type=='specified') and (self.s is not None))
+    def _check_is_SCM(self):
+        if not self.is_SCM():
+            if self.init_type=='specified':
+                raise ValueError("please set noise standard deviations (self.s) before generating data.")
+            else:
+                raise ValueError("must call gen_coefficients(...) before calling gen_data(...)")
+
     #Display helper functions for overwriting in the time series case
     def _get_num_cols(self):
         return 1
@@ -682,10 +676,14 @@ class CausalModel(object):
     #Magic and numpy Functions
     #returning a matrix or element
     def __getitem__(self, tpl):
+        '''CausalModel[i,j] returns CausalModel.A[i,j]'''
         return self.A.__getitem__(tpl)
     def __setitem__(self, tpl, v):
+        '''CausalModel[i,j]=Y is equivalent to setting CausalModel.A[i,j]=Y.'''
         return self.A.__setitem__(tpl,v)
     def __eq__(self, G):
+        '''returns whether two CausalModels are equivalent graphs or SCMs assuming 
+        indistinguishable nodes'''
         if (isinstance(G, CausalModel) and self.N==G.N #check basics
             and ((self.s is None) == (G.s is None))): 
             #all possible topological orders for self
@@ -709,28 +707,40 @@ class CausalModel(object):
             axis = self.AXIS_LABELS[axis]
         return func(matrix, axis=axis)
     def sum(self, axis=None, matrix=None, out=None):
+        '''CausalModel.sum(axis=AX) returns CausalModel.A.sum(axis=AX), where AX may be
+        an integer or an axis name from self.AXIS_LABELS. If MATRIX is not None, then
+        the function will be applied to MATRIX instead of CausalModel.A, which is useful
+        when AXIS_LABELS names are used.'''
         return self._pass_on_solo(np.sum, axis, matrix)
     def any(self, axis=None, matrix=None):
+        '''CausalModel.any(axis=AX) returns CausalModel.A.any(axis=AX), where AX may be
+        an integer or an axis name from self.AXIS_LABELS. If MATRIX is not None, then
+        the function will be applied to MATRIX instead of CausalModel.A, which is useful
+        when AXIS_LABELS names are used.'''
         return self._pass_on_solo(np.any, axis, matrix)
     def transpose(self):
+        '''Returns the transpose of self.A.'''
         return self.A.T
 
     #modifying the CausalModel in place
-    def _i_pass_on(self, func, other=None, apply_to_s=False, s_abs=False):
-        apply_to_s = (apply_to_s and (self.s is not None) 
-                      and ((type(other) is not CausalModel) or (other.s is not None)))
-        if other is None:
+    def _i_pass_on(self, func, other=None, apply_to_s=True):
+        apply_to_s = (apply_to_s 
+                      and (self.s is not None) 
+                      and ((type(other) is not CausalModel) 
+                           or (other.s is not None)
+                          )
+                     )
+        if other is None:               #apply func to A and s
             self.A = func(self.A)
             if apply_to_s:
-                G_new.s = func(self.s)
-        elif type(other) is np.ndarray:
+                self.s = func(self.s)
+        elif type(other) is np.ndarray: #apply func only to A
             self.A = func(self.A,other)
         elif type(other) in [float, int]:
             self.A = func(self.A,other)
-            if apply_to_s:
-                s_other = np.abs(other) if s_abs else other
-                self.s = func(self.s,s_other)
-        elif type(other) is CausalModel:
+            if apply_to_s:              #apply func to s and abs(other) to keep s positive
+                self.s = func(self.s,np.abs(other))
+        elif type(other) is type(self):
             self.A = func(self.A,other.A)
             if apply_to_s:
                 self.s = func(self.s,other.s)
@@ -739,18 +749,29 @@ class CausalModel(object):
                 func,type(other)))
         return self
     def i_triu(self):
-        return self._i_pass_on(np.triu)
+        '''Modifies the CausalModel in place, setting A to np.triu(A).'''
+        return self._i_pass_on(np.triu, apply_to_s = False)
     def __imul__(self, other):
-        return self._i_pass_on(lambda x,y : x*y, other, apply_to_s = True, s_abs=True)
+        '''CausalModel*=Y modifies CausalModel.A (and CausalModel.s, if initialized)
+        in place. If Y is a float, both A and s are multiplied by Y. If Y is an array, 
+        A is multiplied element-wise by Y. If Y is a CausalModel, then A is multiplied 
+        element-wise by Y.A, and s is multiplied element-wise by Y.s, if both are initialized.'''
+        return self._i_pass_on(lambda x,y : x*y, other)
     def __itruediv__(self,other):
-        return self._i_pass_on(lambda x,y : x/y, other, apply_to_s = True, s_abs=True)
+        '''CausalModel/=Y modifies CausalModel.A (and CausalModel.s, if initialized)
+        in place. If Y is a float, both A and s are divided by Y. If Y is an array, 
+        A is divided element-wise by Y.'''
+        if type(other) not in [np.ndarray, float, int]:
+            raise TypeError("division not supported for types CausalModel and {}".format(type(other)))
+        return self._i_pass_on(lambda x,y : x/y, other)
     def __ipow__(self, other):
+        '''CausalModel**=Y sets A to A**Y and s (if initialized) to s**Y. Y must be a 
+        positive float or int.'''
         if (type(other) not in [int, float]):
             raise TypeError("** only supported for CausalModel and float")
         if other <= 0:
             raise ValueError("power must be positive")
-        sgn = np.sign(self.A)
-        return self._i_pass_on(lambda x,y : abs(x)**y*sgn, other, apply_to_s = True)
+        return self._i_pass_on(lambda x,y : x**y, other)
 
     #returning a new CausalModel
     def _pass_on(self, ifunc, other=None):
@@ -761,16 +782,28 @@ class CausalModel(object):
             ifunc(G_new, other=other)
         return G_new
     def __abs__(self):
+        '''Returns a new CausalModel equivalent to the current one in all 
+        regards but the adjacency matrix, which is np.abs(self.A)'''
         G_new = deepcopy(self)
         G_new.A = np.abs(G_new.A)
         return G_new
     def triu(self):
+        '''Returns a new CausalModel with A = np.triu(CausalModel.A).'''
         return self._pass_on(CausalModel.i_triu)
     def __mul__(self, other):
+        '''CausalModel*Y returns a new CausalModel where A (and s, if initialized) are
+        modified. If Y is a float, both A and s are multiplied by Y. If Y is an array, 
+        A is multiplied element-wise by Y. If Y is a CausalModel, then A is multiplied 
+        element-wise by Y.A, and s is multiplied element-wise by Y.s, if both are initialized.'''
         return self._pass_on(CausalModel.__imul__, other)
     def __truediv__(self, other):
+        '''CausalModel/Y returns a new CausalModel where A (and s, if initialized) are
+        modified. If Y is a float, both A and s are divided by Y. If Y is an array, 
+        A is divided element-wise by Y.'''
         return self._pass_on(CausalModel.__itruediv__, other)
     def __pow__(self, other):
+        '''CausalModel**Y returns a new CausalModel with A = CausalModel.A**Y and 
+        s = CausalModel.s**Y (if s was initialized). Y must be a positive float or int.'''
         return self._pass_on(CausalModel.__ipow__, other)
 
     def _repr_html_(self):
@@ -881,16 +914,22 @@ class CausalModel(object):
                             rep, ri, r = make_table_contents(table_id, summary_edges)
             plot_table(table_id, rep, ri, h)
                             
-        return "CausalModel at {}".format(hex(id(self)))
+        return self._rep_id()
+
+    def _rep_id(self):
+        return "{} at {}".format(self.__class__.__name__, hex(id(self)))
         
     def __repr__(self):
-        ret = "CausalModel at {}: ".format(hex(id(self)))
-        if self.style is not None:
+        '''Returns location of the CausalModel and a text-based description of it.'''
+        ret = self._rep_id()
+        if self.is_SCM():
             ret += '\n'
         return ret+str(self)
 
     def __str__(self):
-        if self.style==None: #syntax inspired by graphical_models
+        '''Returns a string-based representation of the graph or SCM 
+        with approximate parameter values.'''
+        if not self.is_SCM(): #syntax inspired by graphical_models
             return ''.join(
                 ['|'.join(list(filter(None,[
                     self.print_labels[v],
@@ -901,6 +940,7 @@ class CausalModel(object):
             for v in self.topo_order:
                 Acur = self[:,v]
                 active = Acur.astype(bool)
+                max_len = max(self.get_num_parents())+1
                 U = 'U'+_unicode_subscript(str(v))
                 to_print+=['='.join([self.print_labels[v],'+'.join(list(filter(None,[
                     ''.join(
@@ -908,7 +948,7 @@ class CausalModel(object):
                             ['+' if aij >= 0 else '' for aij in Acur[active]],
                             Acur[active],
                             self.print_labels[active])),
-                    f'{U},'+'\t'*(self.N-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
+                    f'{U},'+'\t'*(max_len-sum(active))+f'{U}~N(0,{round(self.s[v],2)})'
                 ])))])]
             return '\n'.join(to_print)
 
@@ -1257,6 +1297,7 @@ class tsCausalModel(CausalModel):
         generation, or more than 1000 for 'unit-variance-noise' generation), this
         raises a GenerationError.
         '''
+        self._check_is_SCM()
         for a in range(generation_attempts):
             U = np.random.normal(size=(self.N, T+self.tau_max))
             X = np.zeros(U.shape)
@@ -1270,7 +1311,7 @@ class tsCausalModel(CausalModel):
                           + np.sum(np.array([[self[j,i,v]*X[j,t-v]
                                               for v in self.lags]
                                              for j in self.variables])))
-            TS = TimeSeries(self.N, T, self.labels, X[:,self.tau_max:])
+            TS = TimeSeries(self.N, T, self.labels, X[:,self.tau_max:], self.print_labels)
             V = TS.var()
             if self.style=='UUMC':
                 cutoff=2
@@ -1675,4 +1716,4 @@ class tsCausalModel(CausalModel):
         return self.A.transpose(1,0,2)#assumes that time will be 3rd.
     
     def __str__(self):
-        return "tsCausalModel {}".format(id(self))
+        return self._rep_id()

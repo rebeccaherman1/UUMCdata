@@ -55,7 +55,7 @@ class Data(object):
             A version of labels that does not require Latex rendering
         '''
         s = data.shape
-        if (s[self.AXIS_LABELS['variables']]!=N) or (s[self.AXIS_LABELS['observations']]!= O):
+        if (s[self.AXIS_LABELS['variables']]!=N) or (s[self.AXIS_LABELS['observations']]!= P):
             raise ValueError("data must be an N x O array")
         self.N = N
         self.P = P
