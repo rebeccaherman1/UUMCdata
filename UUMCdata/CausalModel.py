@@ -243,7 +243,7 @@ class CausalModel(object):
     def from_causallearn(cls, cpdag):
         '''creage a CAUSALMODEL object from a causal-learn cpdag'''
         _A = cpdag.graph
-        return cls.specified(-_A*(_A<0))
+        return cls.specified(-_A*(_A<0), labels=[str(n) for n in cpdag.get_node_names()])
 
     @classmethod
     def from_networkx(cls, nxg, noise=None):
@@ -257,12 +257,13 @@ class CausalModel(object):
     def from_causaldag(cls, gmg):
         '''create a CAUSALMODEL object from a CAUSALDAG (gauss)dag'''
         gm = importlib.__import__('graphical_models')
+        mat_names = gmg.to_amat() #returns a tuple with the matrix and names for a DAG, but only the matrix for GaussDAG!
         if isinstance(gmg, gm.GaussDAG):
-            G2 = cls.specified(gmg.to_amat(), noise=gmg.variances**.5)
+            G2 = cls.specified(mat_names, noise=gmg.variances**.5)#, labels=mat_names[1])
             G2.cov = gmg.covariance
             return G2
         elif isinstance(gmg, gm.DAG):
-            return cls.specified(gmg.to_amat()[0])
+            return cls.specified(mat_names[0], labels=mat_names[1])
         else:
             raise TypeError(("gmg must be type graphical_models.DAG or type ",
                             "graphical_models.GaussDAG, not {}".format(type(gmg))))
@@ -542,7 +543,7 @@ class CausalModel(object):
     def _check_static(self, pkg):
         return True
     def to_causallearn(self):
-        '''Create a causal-learn CausalDag from current adjacency matrix.
+        '''Create a causal-learn CausalDag from current adjacency matrix (weights and noises lost).
         Credit to ZehaoJin: 
         https://github.com/py-why/causal-learn/issues/167#issuecomment-1947214169'''
         self._check_static('causal-learn')
@@ -564,21 +565,24 @@ class CausalModel(object):
         DAG = cg.G
         return DAG
     def to_networkx(self):
-        '''Create a networkx DiGraph from current adjacency matrix.'''
+        '''Create a networkx DiGraph from current adjacency matrix (noises lost).'''
         self._check_static('networkx')
         nx = importlib.__import__('networkx')
         return nx.from_numpy_array(self.A.squeeze(), 
-                                   create_using=nx.DiGraph, 
-                                   nodelist = self.print_causlabels)
+                                   create_using=nx.DiGraph,
+                                   nodelist = self.print_labels)
     def to_causaldag(self):
-        '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
+        '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).
+        Currently, due to the implementation in graphical_models, node names will 
+        be lost for GuassDAGs.'''
         self._check_static('causaldag')
         gm = importlib.__import__('graphical_models')
         A_ = self.A.squeeze()
-        if self.s is None:
-            gmg = gm.DAG.from_amat(A_)
-        else:
+        if self.is_SCM():
             gmg = gm.GaussDAG.from_amat(A_, variances = self.s**2)
+        else:
+            gmg = gm.DAG.from_amat(A_)
+            gmg = gmg.rename_nodes({n: str(self.print_labels[i]) for i, n in enumerate(gmg.nodes)})
         return gmg
 
     #gen_coefficients helper functions
@@ -924,6 +928,8 @@ class CausalModel(object):
         ret = self._rep_id()
         if self.is_SCM():
             ret += '\n'
+        else:
+            ret += ': '
         return ret+str(self)
 
     def __str__(self):
