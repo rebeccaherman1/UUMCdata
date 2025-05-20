@@ -3,8 +3,8 @@ Gaussian SCM and Data Generation (https://doi.org/10.48550/arXiv.2503.17037)"""
 
 # Author: Dr. Rebecca Jean Herman <rebecca.herman@tu-dresden.de>
 
-from UUMCdata.ChecksErrors import *
-from UUMCdata.Data import *
+from .ChecksErrors import *
+from .Data import *
 #from ChecksErrors import *
 #from Data import *
 
@@ -550,7 +550,7 @@ class CausalModel(object):
                                   fromlist=['CausalGraph'])
         adjacency_matrix = self.get_adjacencies().squeeze()
         num_nodes = adjacency_matrix.shape[0]
-        cg = cl.CausalGraph(num_nodes)
+        cg = cl.CausalGraph(num_nodes, node_names = self.print_labels)
         for i in range(num_nodes):
             for j in range(num_nodes):
                 edge1 = cg.G.get_edge(cg.G.nodes[i], cg.G.nodes[j])
@@ -569,7 +569,7 @@ class CausalModel(object):
         nx = importlib.__import__('networkx')
         return nx.from_numpy_array(self.A.squeeze(), 
                                    create_using=nx.DiGraph, 
-                                   nodelist = self.labels)
+                                   nodelist = self.print_causlabels)
     def to_causaldag(self):
         '''Create a causaldag (gauss)dag from current adjacency matrix (and noises).'''
         self._check_static('causaldag')
