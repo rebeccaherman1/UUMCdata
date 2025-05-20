@@ -33,5 +33,5 @@ jobs:
         if: contains(github.ref, 'RELEASE')  # check if tag contains 'RELEASE'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.SCHLEUSSEL }}
+          #repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.PPKEY }} #SCHLEUSSEL
